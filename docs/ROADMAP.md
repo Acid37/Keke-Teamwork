@@ -106,7 +106,7 @@ backend/orchestrator.py
 - [x] `ToolContext` 增加 `delegate_runner`
 - [x] Orchestrator 提供只读子 Agent runner
 - [x] 子 Agent 默认限制为 `read_file` / `grep_search` / `find_files` / `list_directory`
-- [ ] 增加 `delegate_agent` 自动化测试
+- [x] 增加 `delegate_agent` 自动化测试
 - [ ] 改进前端多 Agent 时间线展示
 
 建议新增：
@@ -136,6 +136,7 @@ backend/tools/delegate.py
 - [x] 子 Agent 可独立完成只读研究任务。
 - [x] 子 Agent 结果能回到主 Agent 上下文。
 - [x] 前端能显示子 Agent 的名称和角色。
+- [x] 委派链路测试覆盖只读边界，不允许写文件或运行命令。
 
 ### Phase D — 并行 researcher
 
