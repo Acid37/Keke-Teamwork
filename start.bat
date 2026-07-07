@@ -25,10 +25,13 @@ for /f "tokens=5" %%P in ('netstat -aon 2^>nul ^| find ":8765" ^| find "LISTENIN
 if !KILLED!==0 echo  [就绪] 端口 8765 空闲
 
 REM ── 首次运行安装依赖 ──
-if not exist .deps_installed (
+set CACHE_DIR=.cache
+set DEPS_MARKER=%CACHE_DIR%\deps_installed
+if not exist "%CACHE_DIR%" mkdir "%CACHE_DIR%"
+if not exist "%DEPS_MARKER%" (
     echo  [1/4] 安装后端依赖...
     python -m pip install -e . --quiet || (echo  [错误] 安装失败 & pause & exit /b 1)
-    echo .> .deps_installed
+    echo .> "%DEPS_MARKER%"
 )
 if not exist frontend\node_modules (
     echo  [2/4] 安装前端依赖...

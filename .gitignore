@@ -29,7 +29,7 @@ yarn-error.log*
 pnpm-debug.log*
 
 # Local app state
-.deps_installed
+.cache/
 .coding-teamwork/
 
 # Environment / secrets
