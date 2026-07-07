@@ -71,7 +71,7 @@ v0.2 的目标不是继续堆 UI，而是让项目名副其实：
 - [x] `WebSocketServer._handle_user_message()` 改为委托 Orchestrator
 - [x] Solo 模式仍强制使用 `main` Agent
 - [ ] 增加 Orchestrator 基础测试
-- [ ] 在 Orchestrator 内暴露子 Agent runner，供 `delegate_agent` 使用
+- [x] 在 Orchestrator 内暴露子 Agent runner，供 `delegate_agent` 使用
 
 建议新增：
 
@@ -99,6 +99,16 @@ backend/orchestrator.py
 
 目标：让主 Agent 具备“委派任务”的能力。
 
+当前进展：
+
+- [x] 新增 `backend/tools/delegate.py`
+- [x] `main` 默认工具列表加入 `delegate_agent`
+- [x] `ToolContext` 增加 `delegate_runner`
+- [x] Orchestrator 提供只读子 Agent runner
+- [x] 子 Agent 默认限制为 `read_file` / `grep_search` / `find_files` / `list_directory`
+- [ ] 增加 `delegate_agent` 自动化测试
+- [ ] 改进前端多 Agent 时间线展示
+
 建议新增：
 
 ```text
@@ -122,10 +132,10 @@ backend/tools/delegate.py
 
 建议验收：
 
-- [ ] main Agent 可以调用 `delegate_agent`。
-- [ ] 子 Agent 可独立完成只读研究任务。
-- [ ] 子 Agent 结果能回到主 Agent 上下文。
-- [ ] 前端能显示子 Agent 的名称和角色。
+- [x] main Agent 可以调用 `delegate_agent`。
+- [x] 子 Agent 可独立完成只读研究任务。
+- [x] 子 Agent 结果能回到主 Agent 上下文。
+- [x] 前端能显示子 Agent 的名称和角色。
 
 ### Phase D — 并行 researcher
 
@@ -171,9 +181,9 @@ agent.model > role model > main_model
 
 建议验收：
 
-- [ ] researcher 默认使用 `research_model`。
-- [ ] coder 默认使用 `coder_model`。
-- [ ] Agent 自定义 model 优先级最高。
+- [x] researcher 默认使用 `research_model`。
+- [x] coder 默认使用 `coder_model`。
+- [x] Agent 自定义 model 优先级最高。
 - [ ] 设置界面文案与实际行为一致。
 
 ### Phase F — 测试与安全加固

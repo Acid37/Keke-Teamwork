@@ -27,6 +27,7 @@ _DEFAULT_AGENTS: list[dict] = [
         "tools": [
             "read_file", "write_file", "edit_file",
             "run_console", "grep_search", "find_files", "list_directory",
+            "delegate_agent",
         ],
         "max_tool_rounds": 50,
         "color": "#4a9eff",

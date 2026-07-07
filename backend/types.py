@@ -148,6 +148,7 @@ class ToolContext:
     staging: Any = None  # FileStagingArea | None (avoid circular import)
     checkpoint_mgr: Any = None  # CheckpointManager | None
     permission_mgr: Any = None  # PermissionManager | None
+    delegate_runner: Any = None  # Callable for delegate_agent tool (avoid circular import)
     broadcast: Callable[..., Awaitable[None]] | None = None
     interrupt_check: Callable[[], bool] | None = None
 
@@ -167,6 +168,7 @@ class AgentDefinition:
     tools: list[str] = field(default_factory=lambda: [
         "read_file", "write_file", "edit_file",
         "run_console", "grep_search", "find_files", "list_directory",
+        "delegate_agent",
     ])
     max_tool_rounds: int = 50
     color: str = "#4a9eff"           # frontend display color

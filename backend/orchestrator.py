@@ -20,7 +20,7 @@ from backend.llm.client import LLMClient
 from backend.safety.file_staging import FileStagingArea
 from backend.safety.permission import PermissionManager
 from backend.tools import ALL_TOOLS, resolve_tools
-from backend.types import Phase, Session, ToolContext
+from backend.types import AgentDefinition, AgentResult, Phase, Session, ToolContext
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +69,7 @@ class AgentOrchestrator:
         if session.solo_mode:
             agent_id = "main"
 
-        agent_def = self._agent_store.get_agent(agent_id)
-        if not agent_def:
-            agent_def = self._agent_store.get_agent("main")
+        agent_def = self._resolve_agent(agent_id)
         if not agent_def:
             await broadcast("error", {
                 "message": "No agent definitions available",
@@ -79,18 +77,9 @@ class AgentOrchestrator:
             })
             return
 
-        effective_model = agent_def.model or self._config.main_model
+        effective_model = self._resolve_model(agent_def)
         effective_provider = agent_def.provider or self._config.provider
-
-        if agent_def.provider or agent_def.model:
-            llm = LLMClient(
-                provider=effective_provider,
-                api_key=self._config.api_key,
-                base_url=self._config.base_url,
-                model=effective_model,
-            )
-        else:
-            llm = self._llm
+        llm = self._create_llm_for_agent(agent_def, effective_model, effective_provider)
 
         agent_tools = resolve_tools(agent_def.tools) if agent_def.tools else ALL_TOOLS
 
@@ -153,6 +142,12 @@ class AgentOrchestrator:
             work_dir=session.work_dir,
             staging=staging,
             permission_mgr=permission_mgr,
+            delegate_runner=lambda **kwargs: self._run_delegated_agent(
+                session=session,
+                broadcast=broadcast,
+                parent_agent_id=aid,
+                **kwargs,
+            ),
             broadcast=broadcast,
             interrupt_check=lambda: session.interrupt_requested,
         )
@@ -272,6 +267,211 @@ class AgentOrchestrator:
         finally:
             self._permission_managers.pop(session.id, None)
 
+    async def _run_delegated_agent(
+        self,
+        *,
+        session: Session,
+        broadcast: Broadcast,
+        parent_agent_id: str,
+        agent_id: str,
+        task: str,
+        context: str = "",
+    ) -> str:
+        """Run a delegated sub-agent and return a compact summary.
+
+        First version is intentionally read-only: delegated agents only receive
+        read/search/list tools, even if their stored definition grants more.
+        This avoids write conflicts until the orchestrator has explicit handoff
+        and conflict handling.
+        """
+        agent_def = self._agent_store.get_agent(agent_id)
+        if not agent_def:
+            raise ValueError(f"Agent '{agent_id}' not found")
+        if agent_def.agent_id == parent_agent_id:
+            raise ValueError("An agent cannot delegate to itself")
+
+        allowed_tools = [
+            "read_file",
+            "grep_search",
+            "find_files",
+            "list_directory",
+        ]
+        agent_tools = resolve_tools([
+            name for name in agent_def.tools
+            if name in allowed_tools
+        ])
+        if not agent_tools:
+            agent_tools = resolve_tools(allowed_tools)
+
+        effective_model = self._resolve_model(agent_def)
+        effective_provider = agent_def.provider or self._config.provider
+        llm = self._create_llm_for_agent(agent_def, effective_model, effective_provider)
+
+        await broadcast("agent.started", {
+            "agent_id": agent_def.agent_id,
+            "agent_name": agent_def.name,
+            "role": agent_def.role,
+            "color": agent_def.color,
+            "parent_agent_id": parent_agent_id,
+            "delegated": True,
+        })
+
+        aid = agent_def.agent_id
+        aname = agent_def.name
+        arole = agent_def.role
+        acolor = agent_def.color
+        tool_call_ids: dict[str, list[str]] = {}
+
+        async def broadcast_tool_call(name: str, args: dict):
+            call_id = uuid4().hex[:8]
+            tool_call_ids.setdefault(name, []).append(call_id)
+            await broadcast("tool.call", {
+                "name": name,
+                "args": args,
+                "stage": "running",
+                "source": arole,
+                "call_id": call_id,
+                "agent_id": aid,
+                "parent_agent_id": parent_agent_id,
+            })
+
+        async def broadcast_tool_result(name: str, success: bool, result: str):
+            call_id = (
+                tool_call_ids.get(name, []).pop(0)
+                if tool_call_ids.get(name)
+                else uuid4().hex[:8]
+            )
+            await broadcast("tool.call", {
+                "name": name,
+                "args": {"result": result},
+                "stage": "completed",
+                "source": arole,
+                "call_id": call_id,
+                "success": success,
+                "agent_id": aid,
+                "parent_agent_id": parent_agent_id,
+            })
+
+        child_context = ToolContext(
+            session=session,
+            work_dir=session.work_dir,
+            staging=None,
+            permission_mgr=None,
+            delegate_runner=None,
+            broadcast=broadcast,
+            interrupt_check=lambda: session.interrupt_requested,
+        )
+
+        agent = Agent(
+            llm,
+            model=effective_model,
+            temperature=agent_def.temperature,
+            max_tool_rounds=agent_def.max_tool_rounds,
+            agent_id=aid,
+            role=arole,
+            agent_name=aname,
+        )
+        agent.tools = agent_tools
+        agent.system_prompt = (
+            agent_def.system_prompt
+            if agent_def.system_prompt
+            else self._build_delegated_system_prompt(session, agent_def)
+        )
+
+        delegated_message = (
+            f"[Delegated task from {parent_agent_id}]\n{task.strip()}\n\n"
+            f"[Context]\n{context.strip() or '(none)'}\n\n"
+            "Return concise findings, cite relevant files when possible, and do not modify files."
+        )
+
+        result = await agent.run(
+            user_message=delegated_message,
+            tool_context=child_context,
+            existing_messages=None,
+            max_tool_rounds=agent_def.max_tool_rounds,
+            on_text=lambda t: broadcast("agent.text", {
+                "text": t,
+                "source": arole,
+                "is_final": False,
+                "agent_id": aid,
+                "agent_name": aname,
+                "role": arole,
+                "color": acolor,
+                "parent_agent_id": parent_agent_id,
+            }),
+            on_thinking=lambda t: broadcast("agent.thinking", {
+                "text": t,
+                "source": arole,
+                "agent_id": aid,
+                "agent_name": aname,
+                "parent_agent_id": parent_agent_id,
+            }),
+            on_tool_call=broadcast_tool_call,
+            on_tool_result=broadcast_tool_result,
+        )
+
+        session.usage_total += result.usage
+        await broadcast("agent.completed", {
+            "agent_id": aid,
+            "agent_name": aname,
+            "role": arole,
+            "summary": result.text[:200] if result.text else "",
+            "usage": {
+                "input_tokens": result.usage.input_tokens,
+                "output_tokens": result.usage.output_tokens,
+            },
+            "parent_agent_id": parent_agent_id,
+            "delegated": True,
+        })
+
+        await broadcast("agent.text", {
+            "text": "",
+            "source": arole,
+            "is_final": True,
+            "agent_id": aid,
+            "agent_name": aname,
+            "parent_agent_id": parent_agent_id,
+        })
+
+        return self._format_delegate_result(agent_def, result)
+
+    def _resolve_agent(self, agent_id: str) -> AgentDefinition | None:
+        return self._agent_store.get_agent(agent_id) or self._agent_store.get_agent("main")
+
+    def _resolve_model(self, agent_def: AgentDefinition) -> str:
+        if agent_def.model:
+            return agent_def.model
+        if agent_def.role == "researcher" and self._config.research_model:
+            return self._config.research_model
+        if agent_def.role == "coder" and self._config.coder_model:
+            return self._config.coder_model
+        return self._config.main_model
+
+    def _create_llm_for_agent(
+        self,
+        agent_def: AgentDefinition,
+        effective_model: str,
+        effective_provider: str,
+    ) -> LLMClient:
+        if agent_def.provider or agent_def.model or effective_model != self._config.main_model:
+            return LLMClient(
+                provider=effective_provider,
+                api_key=self._config.api_key,
+                base_url=self._config.base_url,
+                model=effective_model,
+            )
+        return self._llm
+
+    @staticmethod
+    def _format_delegate_result(agent_def: AgentDefinition, result: AgentResult) -> str:
+        text = (result.text or "").strip()
+        if len(text) > 12_000:
+            text = text[:12_000] + "\n... (delegated result truncated)"
+        return (
+            f"Delegated agent '{agent_def.name}' ({agent_def.agent_id}, role={agent_def.role}) "
+            f"completed.\n\n{text or '(no textual result)'}"
+        )
+
     @staticmethod
     def _should_generate_title(session: Session) -> bool:
         """Only replace placeholder titles, never project/user-provided names."""
@@ -317,4 +517,23 @@ Guidelines:
 - Run tests after making changes when possible
 - Explain your reasoning before making changes
 - If unsure about the project structure, use list_directory and grep_search first
+"""
+
+    @staticmethod
+    def _build_delegated_system_prompt(session: Session, agent_def: AgentDefinition) -> str:
+        """Build the default prompt for read-only delegated agents."""
+        return f"""You are {agent_def.name}, a read-only delegated coding assistant.
+
+Your job is to investigate focused subtasks for another agent. You may inspect
+the local project using read/search/list tools, but you must not modify files,
+run shell commands, or perform broad unrelated work.
+
+Working directory: {session.work_dir}
+
+Guidelines:
+- Stay focused on the delegated task.
+- Cite relevant files and symbols when possible.
+- Prefer concise findings over long explanations.
+- Explicitly mention uncertainty or missing information.
+- Do not attempt to edit files or execute commands.
 """

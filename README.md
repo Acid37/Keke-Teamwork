@@ -38,7 +38,7 @@ Coding Teamwork 不是普通聊天壳，也还不是完整成熟的多 Agent IDE
 ### 计划支持
 
 - 真正的 Orchestrator 多 Agent 编排
-- `delegate_agent` / handoff 工具
+- `delegate_agent` 已支持第一版只读研究委派；handoff 工具仍在规划中
 - 并行 researcher 调度
 - planner / coder / reviewer 协作流
 - coder / research 专用模型路由
@@ -176,6 +176,7 @@ CT_CONSOLE_TIMEOUT
 | `grep_search` | 使用正则搜索文件内容。 |
 | `find_files` | 按名称模式查找文件。 |
 | `list_directory` | 列出目录树。 |
+| `delegate_agent` | 将聚焦子任务委派给其他 Agent；当前第一版默认用于只读 researcher。 |
 
 ## 数据存储
 
@@ -208,11 +209,11 @@ CT_CONSOLE_TIMEOUT
 
 当前优先级：
 
-1. 落地 Orchestrator。
-2. 增加 `delegate_agent` 工具。
-3. 支持并行 researcher。
-4. 补齐关键测试。
-5. 强化安全策略和历史事件持久化。
+1. 补齐 Orchestrator / delegate_agent 基础测试。
+2. 支持并行 researcher。
+3. 完善 reviewer / coder handoff。
+4. 强化安全策略和历史事件持久化。
+5. 优化前端多 Agent 时间线展示。
 
 ## 许可证
 

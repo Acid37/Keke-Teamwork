@@ -6,8 +6,18 @@ from backend.tools.console import ConsoleTool
 from backend.tools.grep import GrepTool
 from backend.tools.find import FindTool
 from backend.tools.ls import LsTool
+from backend.tools.delegate import DelegateTool
 
-ALL_TOOLS = [ReadTool, WriteTool, EditTool, ConsoleTool, GrepTool, FindTool, LsTool]
+ALL_TOOLS = [
+    ReadTool,
+    WriteTool,
+    EditTool,
+    ConsoleTool,
+    GrepTool,
+    FindTool,
+    LsTool,
+    DelegateTool,
+]
 
 # Name → class mapping for resolving agent tool lists
 TOOL_REGISTRY: dict[str, type[Tool]] = {cls.name: cls for cls in ALL_TOOLS}
