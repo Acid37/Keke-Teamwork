@@ -1,0 +1,203 @@
+// Agent definition types (mirrors backend AgentDefinition)
+export interface AgentDefinition {
+  agent_id: string;
+  name: string;
+  role: string;
+  system_prompt: string;
+  provider: string | null;
+  model: string | null;
+  temperature: number;
+  tools: string[];
+  max_tool_rounds: number;
+  color: string;
+  description: string;
+}
+
+export interface ToolInfo {
+  name: string;
+  description: string;
+  parameters: Record<string, any>;
+}
+
+// Active agent tracking (for multi-agent status display)
+export interface ActiveAgent {
+  agent_id: string;
+  agent_name: string;
+  role: string;
+  color: string;
+  status: 'running' | 'completed';
+}
+
+// Downstream events (server -> client)
+export interface WSEvent {
+  type: string;
+  payload: any;
+  session_id: string;
+}
+
+export interface SessionReadyPayload {
+  session_id: string;
+  title: string;
+  phase: string;
+  history: Message[];
+  work_dir?: string;
+  auto_review?: boolean;
+  yolo_mode?: boolean;
+  solo_mode?: boolean;
+}
+
+export interface SessionListPayload {
+  sessions: SessionInfo[];
+}
+
+export interface AgentTextPayload {
+  text: string;
+  source: string;
+  is_final: boolean;
+  agent_id?: string;
+  agent_name?: string;
+  role?: string;
+  color?: string;
+}
+
+export interface AgentThinkingPayload {
+  text: string;
+  source: string;
+  agent_id?: string;
+  agent_name?: string;
+}
+
+export interface AgentStatusPayload {
+  phase: string;
+  detail: string | null;
+}
+
+export interface AgentStartedPayload {
+  agent_id: string;
+  agent_name: string;
+  role: string;
+  color: string;
+}
+
+export interface AgentCompletedPayload {
+  agent_id: string;
+  agent_name: string;
+  role: string;
+  summary: string;
+  usage: { input_tokens: number; output_tokens: number };
+}
+
+export interface ToolCallPayload {
+  name: string;
+  args: Record<string, any>;
+  stage: 'running' | 'completed';
+  source: string;
+  call_id: string;
+  agent_id?: string;
+}
+
+export interface ConsoleOutputPayload {
+  output: string;
+  exit_code: number | null;
+  call_id: string;
+}
+
+export interface FileChangePayload {
+  path: string;
+  action: 'create' | 'modify' | 'delete';
+  diff_text: string;
+}
+
+export interface FilesChangedPayload {
+  summary: string;
+  combined_diff: string;
+  files: FileChangePayload[];
+}
+
+export interface ApprovalRequestPayload {
+  request_id: string;
+  command: string;
+  timeout_seconds: number;
+}
+
+export interface ErrorPayload {
+  message: string;
+  recoverable: boolean;
+}
+
+// Upstream commands (client -> server)
+export interface WSCommand {
+  type: string;
+  payload?: any;
+}
+
+// UI state types
+export interface Message {
+  id: string;
+  role: 'user' | 'assistant' | 'tool' | 'system';
+  content: string;
+  source?: string;
+  agent_id?: string;
+  agent_name?: string;
+  agent_color?: string;
+  tool_calls?: ToolCallInfo[];
+  file_changes?: FilesChangedPayload[];
+  thinking?: string;
+  timestamp: number;
+}
+
+export interface ToolCallInfo {
+  name: string;
+  args: Record<string, any>;
+  result?: string;
+  success?: boolean;
+  call_id: string;
+  stage: 'running' | 'completed';
+  console_output?: string;
+}
+
+export interface SessionInfo {
+  session_id: string;
+  title: string;
+  phase: string;
+  created_at: number;
+  last_active_at: number;
+  work_dir?: string;
+}
+
+export type Phase = 'init' | 'researching' | 'thinking' | 'coding' | 'ready' | 'error';
+
+// Appearance configuration (mirrors backend AppearanceConfig)
+export interface AppearanceConfig {
+  mode: string;            // "dark" | "light" | "auto"
+  theme_color: string;     // hex color e.g. "#4a9eff"
+  wallpaper: string | null;
+  wallpaper_blur: number;  // 0-30
+  wallpaper_opacity: number; // 0-1
+  font_size: number;       // 12-20
+  accent_preset: string;   // preset name or "custom"
+}
+
+/** Structured wallpaper state (mirrors GET /api/wallpaper/status). */
+export interface WallpaperStatus {
+  has_wallpaper: boolean;
+  wallpaper_type: 'image' | 'video' | 'none';
+  wallpaper_filename: string | null;
+  wallpaper_blur: number;
+  wallpaper_opacity: number;
+}
+
+/** Wallpaper preset (from GET /api/wallpaper/presets). */
+export interface WallpaperPreset {
+  id: string;
+  label: string;
+  category: 'dark' | 'light' | 'colorful';
+  filename: string;
+}
+
+/** Theme color preset (matches Neo-MoFox MD3 palette). */
+export interface ThemeColorPreset {
+  id: string;
+  label: string;
+  hex: string;
+}
