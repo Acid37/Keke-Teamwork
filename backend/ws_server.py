@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 import time
 from pathlib import Path
 from uuid import uuid4
@@ -15,20 +14,17 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 
-from backend.agent import Agent
 from backend.agent_store import AgentStore
 from backend.config import AppearanceConfig, AppConfig
 from backend.llm.client import LLMClient
-from backend.safety.file_staging import FileStagingArea
+from backend.orchestrator import AgentOrchestrator
 from backend.safety.permission import PermissionManager
 from backend.session import SessionStore
-from backend.tools import ALL_TOOLS, TOOL_REGISTRY, resolve_tools
+from backend.tools import ALL_TOOLS
 from backend.types import (
     AgentDefinition,
     Phase,
     Session,
-    TokenUsage,
-    ToolContext,
 )
 from backend.assets import (
     PRESETS as WALLPAPER_PRESETS,
@@ -52,6 +48,7 @@ class WebSocketServer:
         self._active_sessions: dict[str, Session] = {}
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._permission_managers: dict[str, PermissionManager] = {}
+        self._orchestrator = self._create_orchestrator()
 
     @staticmethod
     def _create_llm(config: AppConfig) -> LLMClient:
@@ -65,6 +62,15 @@ class WebSocketServer:
     def _reload_llm(self) -> None:
         """Recreate the LLM client after config change."""
         self._llm = self._create_llm(self._config)
+        self._orchestrator = self._create_orchestrator()
+
+    def _create_orchestrator(self) -> AgentOrchestrator:
+        return AgentOrchestrator(
+            config=self._config,
+            llm=self._llm,
+            agent_store=self._agent_store,
+            permission_managers=self._permission_managers,
+        )
 
     def create_app(self) -> FastAPI:
         """Create the FastAPI app with WebSocket endpoint."""
@@ -733,203 +739,22 @@ class WebSocketServer:
         self, ws: WebSocket, session: Session, text: str,
         agent_id: str = "main",
     ) -> None:
-        """Process a user message through the Agent."""
-        session.phase = Phase.THINKING
-        session.last_active_at = time.time()
-
-        # Add user message to history
-        session.messages.append({"role": "user", "content": text})
-        if self._should_generate_title(session):
-            session.title = self._generate_session_title(text, session.work_dir)
-
-        if session.solo_mode:
-            agent_id = "main"
-
-        # Load agent definition (fall back to 'main' if not found)
-        agent_def = self._agent_store.get_agent(agent_id)
-        if not agent_def:
-            agent_def = self._agent_store.get_agent("main")
-        if not agent_def:
-            await self._send_error(ws, "No agent definitions available")
-            return
-
-        # Resolve model: agent override > global config
-        effective_model = agent_def.model or self._config.main_model
-        effective_provider = agent_def.provider or self._config.provider
-
-        # Create LLM client if agent overrides provider/model
-        if agent_def.provider or agent_def.model:
-            llm = LLMClient(
-                provider=effective_provider,
-                api_key=self._config.api_key,
-                base_url=self._config.base_url,
-                model=effective_model,
-            )
-        else:
-            llm = self._llm
-
-        # Resolve tool classes from agent definition
-        agent_tools = resolve_tools(agent_def.tools) if agent_def.tools else ALL_TOOLS
-
-        # Broadcast status
-        await self._send(ws, "agent.status", {
-            "phase": "thinking",
-            "detail": "Processing...",
-        })
-
-        # Broadcast agent.started lifecycle event
-        await self._send(ws, "agent.started", {
-            "agent_id": agent_def.agent_id,
-            "agent_name": agent_def.name,
-            "role": agent_def.role,
-            "color": agent_def.color,
-        })
-
-        # Agent identity for callbacks
-        aid = agent_def.agent_id
-        aname = agent_def.name
-        arole = agent_def.role
-        acolor = agent_def.color
-
-        # Create broadcast callback bound to this WebSocket
+        """Process a user message through the orchestrator."""
         async def broadcast(event_type: str, payload: dict):
             await self._send(ws, event_type, payload)
 
-        tool_call_ids: dict[str, list[str]] = {}
-
-        async def broadcast_tool_call(name: str, args: dict):
-            call_id = uuid4().hex[:8]
-            tool_call_ids.setdefault(name, []).append(call_id)
-            await broadcast("tool.call", {
-                "name": name, "args": args, "stage": "running",
-                "source": arole, "call_id": call_id,
-                "agent_id": aid,
-            })
-
-        async def broadcast_tool_result(name: str, success: bool, result: str):
-            call_id = (
-                tool_call_ids.get(name, []).pop(0)
-                if tool_call_ids.get(name)
-                else uuid4().hex[:8]
-            )
-            await broadcast("tool.call", {
-                "name": name, "args": {"result": result}, "stage": "completed",
-                "source": arole, "call_id": call_id,
-                "success": success, "agent_id": aid,
-            })
-
-        staging = FileStagingArea(session.work_dir)
-        permission_mgr = PermissionManager(
-            broadcast=broadcast,
-            yolo_mode=session.yolo_mode,
-        )
-        self._permission_managers[session.id] = permission_mgr
-
-        # Create tool context
-        tool_context = ToolContext(
-            session=session,
-            work_dir=session.work_dir,
-            staging=staging,
-            permission_mgr=permission_mgr,
-            broadcast=broadcast,
-            interrupt_check=lambda: session.interrupt_requested,
-        )
-
-        # Create agent from definition
-        agent = Agent(
-            llm,
-            model=effective_model,
-            temperature=agent_def.temperature,
-            max_tool_rounds=agent_def.max_tool_rounds,
-            agent_id=aid,
-            role=arole,
-            agent_name=aname,
-        )
-        agent.tools = agent_tools
-        agent.system_prompt = (
-            agent_def.system_prompt
-            if agent_def.system_prompt
-            else self._build_system_prompt(session)
-        )
-
         try:
-            result = await agent.run(
-                user_message=text,
-                tool_context=tool_context,
-                existing_messages=session.messages[:-1],
-                max_tool_rounds=agent_def.max_tool_rounds,
-                on_text=lambda t: broadcast("agent.text", {
-                    "text": t, "source": arole, "is_final": False,
-                    "agent_id": aid, "agent_name": aname,
-                    "role": arole, "color": acolor,
-                }),
-                on_thinking=lambda t: broadcast("agent.thinking", {
-                    "text": t, "source": arole,
-                    "agent_id": aid, "agent_name": aname,
-                }),
-                on_tool_call=broadcast_tool_call,
-                on_tool_result=broadcast_tool_result,
+            await self._orchestrator.run_user_message(
+                session=session,
+                text=text,
+                agent_id=agent_id,
+                broadcast=broadcast,
             )
-
-            # Update session
-            session.messages = result.messages
-            session.usage_total += result.usage
-            session.phase = Phase.READY
-
-            commit = staging.commit()
-            if commit.files_changed and session.auto_review:
-                await self._send(ws, "files.changed", {
-                    "summary": commit.summary,
-                    "combined_diff": commit.combined_diff,
-                    "files": [
-                        {
-                            "path": str(diff.path),
-                            "action": diff.action,
-                            "diff_text": diff.diff_text,
-                        }
-                        for diff in commit.diffs
-                    ],
-                })
-
-            # Broadcast agent.completed lifecycle event
-            await self._send(ws, "agent.completed", {
-                "agent_id": aid,
-                "agent_name": aname,
-                "role": arole,
-                "summary": result.text[:200] if result.text else "",
-                "usage": {
-                    "input_tokens": result.usage.input_tokens,
-                    "output_tokens": result.usage.output_tokens,
-                },
-            })
-
-            # Send final text marker
-            await self._send(ws, "agent.text", {
-                "text": "", "source": arole, "is_final": True,
-                "agent_id": aid, "agent_name": aname,
-            })
-
-            # Update status
-            await self._send(ws, "agent.status", {
-                "phase": "ready", "detail": None,
-            })
-
-        except asyncio.CancelledError:
-            staging.rollback()
-            session.phase = Phase.READY
-            await self._send(ws, "agent.text", {
-                "text": "\n\n[被用户中断]", "source": arole, "is_final": True,
-                "agent_id": aid, "agent_name": aname,
-            })
-            await self._send(ws, "agent.status", {
-                "phase": "ready", "detail": "Interrupted",
-            })
 
         except Exception as e:
-            staging.rollback()
-            logger.exception("Agent execution failed")
+            logger.exception("Orchestrator execution failed")
             session.phase = Phase.ERROR
-            await self._send_error(ws, f"Agent error: {e}")
+            await self._send_error(ws, f"Orchestrator error: {e}")
             await self._send(ws, "agent.status", {
                 "phase": "error", "detail": str(e),
             })
@@ -989,51 +814,6 @@ class WebSocketServer:
                 "output_tokens": session.usage_total.output_tokens,
             },
         })
-
-    @staticmethod
-    def _should_generate_title(session: Session) -> bool:
-        """Only replace placeholder titles, never project/user-provided names."""
-        title = (session.title or "").strip()
-        return not title or bool(re.fullmatch(r"Session \d{2}:\d{2}", title))
-
-    @staticmethod
-    def _generate_session_title(text: str, work_dir: Path) -> str:
-        """Create a short deterministic title from the first user message."""
-        cleaned = re.sub(r"[`*_#>\[\](){}]", "", text).strip()
-        cleaned = re.sub(r"\s+", " ", cleaned)
-        cleaned = re.sub(r"^(请|帮我|麻烦|能不能|可以)?\s*", "", cleaned)
-        if not cleaned:
-            cleaned = work_dir.name or "新会话"
-        if len(cleaned) > 24:
-            cleaned = cleaned[:24].rstrip() + "…"
-        return cleaned
-
-    @staticmethod
-    def _build_system_prompt(session: Session) -> str:
-        """Build the system prompt for the main agent."""
-        return f"""You are a helpful coding assistant. You help users with software development tasks.
-
-You have access to the following tools:
-- read_file: Read file contents with line numbers
-- write_file: Create or overwrite a file
-- edit_file: Search and replace text in a file
-- run_console: Execute shell commands
-- grep_search: Search file contents with regex
-- find_files: Find files by name pattern
-- list_directory: List directory contents in tree format
-
-Working directory: {session.work_dir}
-
-Guidelines:
-- Read files before modifying them to understand context
-- Use edit_file for small changes (preserves surrounding code)
-- Use write_file only for new files or complete rewrites
-- Run tests after making changes when possible
-- Explain your reasoning before making changes
-- If unsure about the project structure, use list_directory and grep_search first
-"""
-
-
 
 # ─── ASGI entry points ─────────────────────────────────────────────
 # Uvicorn's reload mode requires the app to be importable as a string

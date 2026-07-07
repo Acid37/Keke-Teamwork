@@ -64,6 +64,15 @@ v0.2 的目标不是继续堆 UI，而是让项目名副其实：
 
 目标：引入统一编排入口，但不一次性做复杂工作流。
 
+当前进展：
+
+- [x] 新增 `backend/orchestrator.py`
+- [x] 将单 Agent 执行流程封装到 `AgentOrchestrator.run_user_message()`
+- [x] `WebSocketServer._handle_user_message()` 改为委托 Orchestrator
+- [x] Solo 模式仍强制使用 `main` Agent
+- [ ] 增加 Orchestrator 基础测试
+- [ ] 在 Orchestrator 内暴露子 Agent runner，供 `delegate_agent` 使用
+
 建议新增：
 
 ```text
@@ -81,9 +90,9 @@ backend/orchestrator.py
 
 建议验收：
 
-- [ ] `_handle_user_message` 中 Agent 运行逻辑被迁移/封装到 Orchestrator。
-- [ ] Solo 模式行为保持不变。
-- [ ] 非 Solo 模式至少可以由 Orchestrator 调用 main Agent。
+- [x] `_handle_user_message` 中 Agent 运行逻辑被迁移/封装到 Orchestrator。
+- [x] Solo 模式行为保持不变。
+- [x] 非 Solo 模式至少可以由 Orchestrator 调用 main Agent。
 - [ ] 现有 WebSocket 事件不破坏前端显示。
 
 ### Phase C — `delegate_agent` 工具
