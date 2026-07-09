@@ -111,6 +111,22 @@ export interface ResearchCompletedPayload {
   result_count: number;
 }
 
+export interface HandoffStartedPayload {
+  agent_id: string;
+  agent_name: string;
+  role: string;
+  parent_agent_id: string;
+  task: string;
+}
+
+export interface HandoffCompletedPayload extends HandoffStartedPayload {
+  text: string;
+}
+
+export interface HandoffFailedPayload extends HandoffStartedPayload {
+  error: string;
+}
+
 export interface ToolCallPayload {
   name: string;
   args: Record<string, any>;

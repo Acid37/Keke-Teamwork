@@ -13,6 +13,9 @@ import {
   ResearchStartedPayload,
   ResearchResultPayload,
   ResearchCompletedPayload,
+  HandoffStartedPayload,
+  HandoffCompletedPayload,
+  HandoffFailedPayload,
   ToolCallPayload,
   ConsoleOutputPayload,
   FilesChangedPayload,
@@ -567,6 +570,19 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         payload.errored_sources.length ? `异常：${payload.errored_sources.join(', ')}` : '',
       ].filter(Boolean).join('；');
       addSystemMessage(dispatch, `并行研究完成：${status}\n\n${payload.merged_text}`);
+    });
+
+    ws.on('handoff.started', (payload: HandoffStartedPayload) => {
+      addSystemMessage(dispatch, `${payload.agent_name} 开始执行 handoff：${payload.task}`);
+    });
+
+    ws.on('handoff.completed', (payload: HandoffCompletedPayload) => {
+      const text = payload.text?.trim() || '(无文本结果)';
+      addSystemMessage(dispatch, `${payload.agent_name} 完成 handoff：\n\n${text}`);
+    });
+
+    ws.on('handoff.failed', (payload: HandoffFailedPayload) => {
+      addSystemMessage(dispatch, `${payload.agent_name} handoff 失败：${payload.error || '未知错误'}`);
     });
 
     ws.on('error', (payload: ErrorPayload) => {
