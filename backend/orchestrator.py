@@ -164,17 +164,34 @@ class AgentOrchestrator:
         )
         self._permission_managers[session.id] = permission_mgr
 
+        async def run_child_agent(agent_id: str, task: str, context: str = "") -> str:
+            child_def = self._agent_store.get_agent(agent_id)
+            if child_def and child_def.role != "researcher":
+                return await self._run_handoff_agent(
+                    session=session,
+                    broadcast=broadcast,
+                    parent_agent_id=aid,
+                    agent_id=agent_id,
+                    task=task,
+                    context=context,
+                    staging=staging,
+                    permission_mgr=permission_mgr,
+                )
+            return await self._run_delegated_agent(
+                session=session,
+                broadcast=broadcast,
+                parent_agent_id=aid,
+                agent_id=agent_id,
+                task=task,
+                context=context,
+            )
+
         tool_context = ToolContext(
             session=session,
             work_dir=session.work_dir,
             staging=staging,
             permission_mgr=permission_mgr,
-            delegate_runner=lambda **kwargs: self._run_delegated_agent(
-                session=session,
-                broadcast=broadcast,
-                parent_agent_id=aid,
-                **kwargs,
-            ),
+            delegate_runner=run_child_agent,
             broadcast=broadcast,
             interrupt_check=lambda: session.interrupt_requested,
         )
@@ -549,6 +566,179 @@ class AgentOrchestrator:
             return summary
         return summary[:max_chars] + "\n... (parallel research summary truncated)"
 
+    async def _run_handoff_agent(
+        self,
+        *,
+        session: Session,
+        broadcast: Broadcast,
+        parent_agent_id: str,
+        agent_id: str,
+        task: str,
+        context: str = "",
+        staging: FileStagingArea,
+        permission_mgr: PermissionManager,
+    ) -> str:
+        """Run one serial child agent with the parent's write safety boundary."""
+        agent_def = self._agent_store.get_agent(agent_id)
+        if not agent_def:
+            raise ValueError(f"Agent '{agent_id}' not found")
+        if agent_def.agent_id == parent_agent_id:
+            raise ValueError("An agent cannot delegate to itself")
+
+        agent_tools = resolve_tools([
+            name for name in agent_def.tools
+            if name != "delegate_agent"
+        ])
+        effective_model = self._resolve_model(agent_def)
+        effective_provider = agent_def.provider or self._config.provider
+        llm = self._create_llm_for_agent(agent_def, effective_model, effective_provider)
+
+        base_payload = {
+            "agent_id": agent_def.agent_id,
+            "agent_name": agent_def.name,
+            "role": agent_def.role,
+            "parent_agent_id": parent_agent_id,
+            "task": task,
+        }
+        await broadcast("handoff.started", base_payload)
+        await broadcast("agent.started", {
+            **base_payload,
+            "color": agent_def.color,
+            "delegated": True,
+            "handoff": True,
+        })
+
+        aid = agent_def.agent_id
+        aname = agent_def.name
+        arole = agent_def.role
+        acolor = agent_def.color
+        tool_call_ids: dict[str, list[str]] = {}
+
+        async def broadcast_tool_call(name: str, args: dict):
+            call_id = uuid4().hex[:8]
+            tool_call_ids.setdefault(name, []).append(call_id)
+            await broadcast("tool.call", {
+                "name": name,
+                "args": args,
+                "stage": "running",
+                "source": arole,
+                "call_id": call_id,
+                "agent_id": aid,
+                "parent_agent_id": parent_agent_id,
+            })
+
+        async def broadcast_tool_result(name: str, success: bool, result: str):
+            call_id = (
+                tool_call_ids.get(name, []).pop(0)
+                if tool_call_ids.get(name)
+                else uuid4().hex[:8]
+            )
+            await broadcast("tool.call", {
+                "name": name,
+                "args": {"result": result},
+                "stage": "completed",
+                "source": arole,
+                "call_id": call_id,
+                "success": success,
+                "agent_id": aid,
+                "parent_agent_id": parent_agent_id,
+            })
+
+        child_context = ToolContext(
+            session=session,
+            work_dir=session.work_dir,
+            staging=staging,
+            permission_mgr=permission_mgr,
+            delegate_runner=None,
+            broadcast=broadcast,
+            interrupt_check=lambda: session.interrupt_requested,
+        )
+
+        agent = Agent(
+            llm,
+            model=effective_model,
+            temperature=agent_def.temperature,
+            max_tool_rounds=agent_def.max_tool_rounds,
+            agent_id=aid,
+            role=arole,
+            agent_name=aname,
+        )
+        agent.tools = agent_tools
+        agent.system_prompt = (
+            agent_def.system_prompt
+            if agent_def.system_prompt
+            else self._build_handoff_system_prompt(session, agent_def)
+        )
+
+        handoff_message = (
+            f"[Handoff task from {parent_agent_id}]\n{task.strip()}\n\n"
+            f"[Context]\n{context.strip() or '(none)'}\n\n"
+            "Work only on this delegated task. File edits must go through the provided tools. "
+            "Do not delegate further."
+        )
+
+        try:
+            result = await agent.run(
+                user_message=handoff_message,
+                tool_context=child_context,
+                existing_messages=None,
+                max_tool_rounds=agent_def.max_tool_rounds,
+                on_text=lambda t: broadcast("agent.text", {
+                    "text": t,
+                    "source": arole,
+                    "is_final": False,
+                    "agent_id": aid,
+                    "agent_name": aname,
+                    "role": arole,
+                    "color": acolor,
+                    "parent_agent_id": parent_agent_id,
+                }),
+                on_thinking=lambda t: broadcast("agent.thinking", {
+                    "text": t,
+                    "source": arole,
+                    "agent_id": aid,
+                    "agent_name": aname,
+                    "parent_agent_id": parent_agent_id,
+                }),
+                on_tool_call=broadcast_tool_call,
+                on_tool_result=broadcast_tool_result,
+            )
+        except Exception as exc:
+            await broadcast("handoff.failed", {
+                **base_payload,
+                "error": str(exc),
+            })
+            raise
+
+        session.usage_total += result.usage
+        await broadcast("agent.completed", {
+            "agent_id": aid,
+            "agent_name": aname,
+            "role": arole,
+            "summary": result.text[:200] if result.text else "",
+            "usage": {
+                "input_tokens": result.usage.input_tokens,
+                "output_tokens": result.usage.output_tokens,
+            },
+            "parent_agent_id": parent_agent_id,
+            "delegated": True,
+            "handoff": True,
+        })
+        await broadcast("handoff.completed", {
+            **base_payload,
+            "text": result.text,
+        })
+        await broadcast("agent.text", {
+            "text": "",
+            "source": arole,
+            "is_final": True,
+            "agent_id": aid,
+            "agent_name": aname,
+            "parent_agent_id": parent_agent_id,
+        })
+
+        return self._format_delegate_result(agent_def, result)
+
     async def _run_delegated_agent(
         self,
         *,
@@ -830,4 +1020,24 @@ Guidelines:
 - Prefer concise findings over long explanations.
 - Explicitly mention uncertainty or missing information.
 - Do not attempt to edit files or execute commands.
+"""
+
+    @staticmethod
+    def _build_handoff_system_prompt(session: Session, agent_def: AgentDefinition) -> str:
+        """Build the default prompt for serial handoff agents."""
+        return f"""You are {agent_def.name}, a delegated {agent_def.role} agent.
+
+Your job is to complete one focused handoff task for the parent agent. You may
+use the tools assigned to your role, but all file changes must go through the
+provided tool/staging boundary, and shell commands must follow the configured
+permission rules. Do not delegate work to other agents.
+
+Working directory: {session.work_dir}
+
+Guidelines:
+- Stay strictly within the delegated task and given context.
+- Prefer small, reviewable file changes.
+- Read relevant files before editing them.
+- Run focused verification commands only when useful.
+- Summarize what changed, what you verified, and any remaining risk.
 """
