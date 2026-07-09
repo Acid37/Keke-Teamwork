@@ -64,6 +64,47 @@
 
 从“研究结果进入 main Agent 上下文”开始。开工前先确认摘要注入格式和长度限制，避免并行研究让模型上下文快速膨胀。
 
+## 下一阶段计划：Research Summary 注入
+
+目标：让 main Agent 真正参考并行 researcher 的合并结论，但继续避免上下文膨胀和权限扩大。
+
+### 建议实现
+
+1. 增加摘要格式化函数
+	- 输入 `MergedResearchResult` 和原始任务。
+	- 输出紧凑的 `[Parallel Research Summary]` 文本。
+	- 包含成功来源、超时来源、异常来源和合并正文。
+
+2. 增加长度限制
+	- 先使用固定字符上限，例如 8k 或 12k。
+	- 超出后截断，并在摘要末尾标记已截断。
+	- 不把每个 researcher 原始全文无节制塞给 main Agent。
+
+3. 接入 main Agent 调用
+	- 非 Solo 模式下，先执行 researcher，再把摘要作为额外上下文交给 main Agent。
+	- Solo 模式保持完全不注入。
+	- 初版不改变前端事件协议，只改变 main Agent 可见上下文。
+
+4. 补测试
+	- 非 Solo 模式下 main Agent 能收到 research summary。
+	- Solo 模式不注入 summary。
+	- 超时和异常来源会出现在 summary 中。
+	- 超长摘要会被截断。
+	- 测试继续使用 fake Agent，不调用真实 LLM/API。
+
+### 验收标准
+
+- [ ] main Agent 的输入中包含紧凑 research summary。
+- [ ] Solo 模式不触发 researcher，也不注入 summary。
+- [ ] summary 有明确长度上限。
+- [ ] researcher 仍保持只读工具边界。
+- [ ] `python -m unittest -v` 通过。
+
+### 推荐提交
+
+1. `Feed research summary into main agent`
+2. `Document research summary handoff`
+
 ## 实施规划
 
 ### 阶段 1：后端事件协议

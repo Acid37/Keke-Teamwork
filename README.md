@@ -2,13 +2,13 @@
 
 > 一个自研的本地 Coding Agent 工作台：用 Web UI 管理项目、会话、模型、Agent 角色，并通过工具调用帮助你阅读、搜索、修改和运行本地代码。
 
-Coding Teamwork 当前处于 **v0.1 → v0.2** 阶段。它已经具备单 Agent 编码助手、文件变更审查、命令审批、会话持久化和基础 Agent 管理能力；真正的多 Agent 协作编排正在规划中。
+Coding Teamwork 当前处于 **v0.1 → v0.2** 阶段。它已经具备单 Agent 编码助手、文件变更审查、命令审批、会话持久化、基础 Agent 管理，以及第一版只读多 Agent researcher 协作链路。
 
 ## 当前定位
 
 Coding Teamwork 不是普通聊天壳，也还不是完整成熟的多 Agent IDE。当前更准确的定位是：
 
-> **一个可运行的本地单 Agent coding assistant 工作台，并为多 Agent teamwork 预留了结构。**
+> **一个可运行的本地 coding assistant 工作台，已开始支持只读多 Agent researcher 协作。**
 
 它适合用来：
 
@@ -17,6 +17,7 @@ Coding Teamwork 不是普通聊天壳，也还不是完整成熟的多 Agent IDE
 - 在执行终端命令前请求用户审批
 - 查看 Agent 写入文件后的 diff
 - 管理不同 Agent 角色、模型、工具权限和提示词
+- 在非 Solo 模式下尝试并行 researcher 只读探索代码库
 - 尝试 OpenAI-compatible / Anthropic / Gemini 等模型提供方
 
 ## 功能概览
@@ -34,15 +35,18 @@ Coding Teamwork 不是普通聊天壳，也还不是完整成熟的多 Agent IDE
 - **模型配置**：支持 OpenAI 兼容接口、Anthropic 和 Gemini，并提供常见 OpenAI-compatible 服务商预设。
 - **Agent 管理**：可创建和编辑 Agent 定义，包括名称、角色、模型、温度、工具列表、最大工具轮次和系统提示词。
 - **外观设置**：支持主题色、暗色/亮色/自动模式、字体大小和壁纸。
+- **Orchestrator 编排入口**：`AgentOrchestrator` 已接管用户消息执行路径，并保持 Solo 模式兼容。
+- **只读委派**：`delegate_agent` 可把聚焦子任务委派给其他 Agent，默认限制为读文件、搜索和列目录。
+- **并行 researcher**：非 Solo 模式下可受控触发多个 researcher 并发探索，受 `max_parallel_researchers` 限制。
+- **研究事件展示**：前端已能展示 researcher 开始、结果、失败/超时和整批完成状态。
+- **基础测试与 CI**：已补充委派、并行 researcher、超时、合并和主流程守卫测试；CI 执行 `python -m unittest -v`。
 
 ### 计划支持
 
-- 真正的 Orchestrator 多 Agent 编排
-- `delegate_agent` 已支持第一版只读研究委派；handoff 工具仍在规划中
-- 并行 researcher 调度
+- 将 researcher 合并摘要注入 main Agent 上下文
 - planner / coder / reviewer 协作流
-- coder / research 专用模型路由
-- 更完整的测试体系
+- 更完整的 handoff / reviewer 流程
+- 更完整的测试体系和手动验证路径
 - 更细粒度的安全策略和高危命令识别
 
 ## 技术栈
@@ -70,6 +74,7 @@ Coding Teamwork 不是普通聊天壳，也还不是完整成熟的多 Agent IDE
 ```text
 backend/
   agent.py              # Agent tool-calling 主循环
+  orchestrator.py       # Agent 编排、委派和并行 researcher 入口
   ws_server.py          # FastAPI / WebSocket / API 路由
   config.py             # 应用配置与外观配置
   session.py            # 会话持久化
@@ -87,6 +92,8 @@ frontend/
 
 docs/
   ROADMAP.md            # 开发计划与里程碑
+  SESSION_AGENDA.md     # 当前分支进展和下一步计划
+  orchestrator-parallel-design.md # 并行 researcher 设计草案
 
 start.bat               # Windows 一键启动脚本
 pyproject.toml          # Python 包配置
@@ -165,6 +172,8 @@ CT_CONSOLE_TIMEOUT
 | YOLO | 跳过命令审批，直接执行 shell 命令。请谨慎开启。 |
 | Solo | 强制使用 main Agent，为未来多 Agent 编排预留。 |
 
+关闭 Solo 后，当前分支会在存在 researcher Agent 时先运行只读并行研究，并把 researcher 状态作为独立消息展示。当前阶段不会让 researcher 自动写文件，也不会把 researcher 原文无限制塞入 main Agent 上下文。
+
 ## 可用工具
 
 | 工具 | 说明 |
@@ -196,10 +205,10 @@ CT_CONSOLE_TIMEOUT
 
 ## 当前限制
 
-- 多 Agent 编排尚未真正落地，目前主要是单 Agent 执行。
-- `coder_model` 和 `research_model` 字段已存在，但还没有完整接入角色路由。
+- 多 Agent 编排仍处于早期阶段，目前只落地了只读 researcher 链路。
+- researcher 合并结果当前主要用于广播和展示，下一步才会以受限摘要形式注入 main Agent 上下文。
+- writer / coder / reviewer 的安全 handoff 尚未落地。
 - `Checkpoint` / `FileSnapshot` 类型已定义，但未形成完整回滚历史系统。
-- 缺少自动化测试。
 - 文件 staging 会扫描项目文本文件，大项目上可能有性能压力。
 - 命令审批目前是粗粒度策略，尚未做高危命令识别和只读命令白名单。
 
@@ -209,11 +218,16 @@ CT_CONSOLE_TIMEOUT
 
 当前优先级：
 
-1. 补齐 Orchestrator / delegate_agent 基础测试。
-2. 支持并行 researcher。
-3. 完善 reviewer / coder handoff。
-4. 强化安全策略和历史事件持久化。
-5. 优化前端多 Agent 时间线展示。
+1. 将 researcher 合并摘要以长度受限的方式注入 main Agent 上下文。
+2. 完善 reviewer / coder handoff。
+3. 强化安全策略和历史事件持久化。
+4. 优化前端多 Agent 时间线展示。
+5. 扩展 SessionStore、PermissionManager、FileStagingArea 等基础模块测试。
+
+当前已验证：
+
+- `python -m unittest -v`：13 个测试通过。
+- `npm run build`：前端构建通过。
 
 ## 许可证
 
