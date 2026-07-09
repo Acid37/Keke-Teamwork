@@ -95,6 +95,28 @@ class AgentOrchestrator:
             "color": agent_def.color,
         })
 
+        if self._should_run_parallel_research(session, agent_def):
+            try:
+                await self.run_parallel_research(
+                    session=session,
+                    task=text,
+                    context="用户消息进入主 Agent 前的只读研究。",
+                    agent_id=agent_def.agent_id,
+                    broadcast=broadcast,
+                )
+            except Exception as exc:
+                logger.exception("Parallel research preflight failed")
+                await broadcast("research.failed", {
+                    "agent_id": "parallel-research",
+                    "agent_name": "Parallel Research",
+                    "role": "researcher",
+                    "parent_agent_id": agent_def.agent_id,
+                    "task": text,
+                    "text": "",
+                    "timed_out": False,
+                    "error": str(exc),
+                })
+
         aid = agent_def.agent_id
         aname = agent_def.name
         arole = agent_def.role
@@ -649,6 +671,19 @@ class AgentOrchestrator:
 
     def _resolve_agent(self, agent_id: str) -> AgentDefinition | None:
         return self._agent_store.get_agent(agent_id) or self._agent_store.get_agent("main")
+
+    def _should_run_parallel_research(
+        self,
+        session: Session,
+        agent_def: AgentDefinition,
+    ) -> bool:
+        """判断当前用户消息是否应触发只读并行研究。"""
+        if session.solo_mode or agent_def.role == "researcher":
+            return False
+        return any(
+            candidate.role == "researcher" and candidate.agent_id != agent_def.agent_id
+            for candidate in self._agent_store.list_agents()
+        )
 
     def _resolve_model(self, agent_def: AgentDefinition) -> str:
         if agent_def.model:

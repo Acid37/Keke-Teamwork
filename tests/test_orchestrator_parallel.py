@@ -5,11 +5,12 @@ import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import IsolatedAsyncioTestCase
+from unittest.mock import patch
 
 from backend.agent_store import AgentStore
 from backend.config import AppConfig
 from backend.orchestrator import AgentOrchestrator
-from backend.types import AgentDefinition, ParallelResearchResult, Session
+from backend.types import AgentDefinition, AgentResult, ParallelResearchResult, Session, TokenUsage, ToolContext
 
 
 class FakeBroadcast:
@@ -38,6 +39,49 @@ def make_agent(agent_id: str, role: str = "researcher") -> AgentDefinition:
         role=role,
         tools=["read_file", "grep_search", "find_files", "list_directory"],
     )
+
+
+class MainFlowFakeAgent:
+    def __init__(
+        self,
+        llm,
+        *,
+        model: str,
+        temperature: float,
+        max_tool_rounds: int,
+        agent_id: str,
+        role: str,
+        agent_name: str,
+    ) -> None:
+        self.tools = []
+        self.system_prompt = ""
+        self.agent_id = agent_id
+        self.role = role
+        self.agent_name = agent_name
+
+    async def run(
+        self,
+        *,
+        user_message: str,
+        tool_context: ToolContext,
+        existing_messages,
+        max_tool_rounds: int,
+        on_text,
+        on_thinking,
+        on_tool_call,
+        on_tool_result,
+    ) -> AgentResult:
+        await on_text("main response")
+        return AgentResult(
+            text="main response",
+            thinking="",
+            tool_calls_history=[],
+            usage=TokenUsage(input_tokens=1, output_tokens=2),
+            messages=[
+                {"role": "user", "content": user_message},
+                {"role": "assistant", "content": "main response"},
+            ],
+        )
 
 
 class ParallelResearcherTests(IsolatedAsyncioTestCase):
@@ -261,6 +305,69 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
 
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].metadata["source"], "researcher")
+
+    async def test_run_user_message_triggers_parallel_research_when_not_solo(self) -> None:
+        with TemporaryDirectory() as tmp:
+            main = make_agent("main", role="assistant")
+            researcher = make_agent("researcher")
+            orchestrator = AgentOrchestrator(
+                config=AppConfig(max_parallel_researchers=1),
+                llm=object(),
+                agent_store=FakeStore([main, researcher]),
+                permission_managers={},
+            )
+            session = Session(id="run-flow-session", work_dir=Path(tmp), solo_mode=False)
+            broadcast = FakeBroadcast()
+
+            async def fake_delegated_agent(**kwargs) -> str:
+                return f"findings from {kwargs['agent_id']}"
+
+            orchestrator._run_delegated_agent = fake_delegated_agent  # type: ignore[method-assign]
+
+            with patch("backend.orchestrator.Agent", MainFlowFakeAgent):
+                await orchestrator.run_user_message(
+                    session=session,
+                    text="inspect the project",
+                    agent_id="main",
+                    broadcast=broadcast,
+                )
+
+        event_types = [event_type for event_type, _ in broadcast.events]
+        self.assertIn("research.started", event_types)
+        self.assertIn("research.result", event_types)
+        self.assertIn("research.completed", event_types)
+        self.assertIn("agent.completed", event_types)
+
+    async def test_run_user_message_skips_parallel_research_in_solo_mode(self) -> None:
+        with TemporaryDirectory() as tmp:
+            main = make_agent("main", role="assistant")
+            researcher = make_agent("researcher")
+            orchestrator = AgentOrchestrator(
+                config=AppConfig(max_parallel_researchers=1),
+                llm=object(),
+                agent_store=FakeStore([main, researcher]),
+                permission_managers={},
+            )
+            session = Session(id="solo-flow-session", work_dir=Path(tmp), solo_mode=True)
+            broadcast = FakeBroadcast()
+
+            async def fake_delegated_agent(**kwargs) -> str:
+                raise AssertionError("solo mode should not run parallel research")
+
+            orchestrator._run_delegated_agent = fake_delegated_agent  # type: ignore[method-assign]
+
+            with patch("backend.orchestrator.Agent", MainFlowFakeAgent):
+                await orchestrator.run_user_message(
+                    session=session,
+                    text="inspect the project",
+                    agent_id="main",
+                    broadcast=broadcast,
+                )
+
+        event_types = [event_type for event_type, _ in broadcast.events]
+        self.assertNotIn("research.started", event_types)
+        self.assertNotIn("research.completed", event_types)
+        self.assertIn("agent.completed", event_types)
 
     def test_merge_parallel_research_results_keeps_status_metadata(self) -> None:
         merged = AgentOrchestrator.merge_parallel_research_results([
