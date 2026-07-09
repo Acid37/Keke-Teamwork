@@ -92,8 +92,75 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
         self.assertTrue(by_source["slow"].metadata["timed_out"])
         self.assertEqual(by_source["slow"].error, "timed out")
 
+        failed_events = [event for event in broadcast.events if event[0] == "research.failed"]
+        self.assertEqual(len(failed_events), 1)
+        self.assertEqual(failed_events[0][1]["agent_id"], "slow")
+        self.assertEqual(failed_events[0][1]["parent_agent_id"], "main")
+        self.assertTrue(failed_events[0][1]["timed_out"])
+        self.assertEqual(failed_events[0][1]["error"], "timed out")
+
         merge_candidates = [result.text for result in results if result.text]
         self.assertEqual(merge_candidates, ["findings from alpha", "findings from beta"])
+
+    async def test_parallel_research_broadcasts_lifecycle_events(self) -> None:
+        main = make_agent("main", role="assistant")
+        researchers = [make_agent("alpha"), make_agent("beta")]
+        orchestrator = AgentOrchestrator(
+            config=AppConfig(max_parallel_researchers=2),
+            llm=object(),
+            agent_store=FakeStore([main, *researchers]),
+            permission_managers={},
+        )
+        session = Session(id="broadcast-session", work_dir=Path("."))
+        broadcast = FakeBroadcast()
+
+        async def fake_delegated_agent(**kwargs) -> str:
+            return f"findings from {kwargs['agent_id']}"
+
+        orchestrator._run_delegated_agent = fake_delegated_agent  # type: ignore[method-assign]
+
+        results = await orchestrator.run_parallel_research(
+            session=session,
+            broadcast=broadcast,
+            agent_id="main",
+            task="inspect broadcast events",
+            context="unit test",
+        )
+
+        self.assertEqual(len(results), 2)
+        event_types = [event_type for event_type, _ in broadcast.events]
+        self.assertEqual(event_types.count("research.started"), 2)
+        self.assertEqual(event_types.count("research.result"), 2)
+        self.assertEqual(event_types.count("research.completed"), 1)
+
+        started_payloads = [payload for event_type, payload in broadcast.events if event_type == "research.started"]
+        self.assertCountEqual(
+            [payload["agent_id"] for payload in started_payloads],
+            ["alpha", "beta"],
+        )
+        for payload in started_payloads:
+            self.assertEqual(payload["parent_agent_id"], "main")
+            self.assertEqual(payload["task"], "inspect broadcast events")
+            self.assertEqual(payload["role"], "researcher")
+
+        result_payloads = [payload for event_type, payload in broadcast.events if event_type == "research.result"]
+        self.assertCountEqual(
+            [payload["text"] for payload in result_payloads],
+            ["findings from alpha", "findings from beta"],
+        )
+        for payload in result_payloads:
+            self.assertFalse(payload["timed_out"])
+            self.assertIsNone(payload["error"])
+
+        completed_payload = [payload for event_type, payload in broadcast.events if event_type == "research.completed"][0]
+        self.assertEqual(completed_payload["parent_agent_id"], "main")
+        self.assertEqual(completed_payload["task"], "inspect broadcast events")
+        self.assertEqual(completed_payload["result_count"], 2)
+        self.assertCountEqual(completed_payload["successful_sources"], ["alpha", "beta"])
+        self.assertEqual(completed_payload["timed_out_sources"], [])
+        self.assertEqual(completed_payload["errored_sources"], [])
+        self.assertIn("### alpha", completed_payload["merged_text"])
+        self.assertIn("### beta", completed_payload["merged_text"])
 
     async def test_parallel_entry_uses_configured_worker_limit(self) -> None:
         main = make_agent("main", role="assistant")

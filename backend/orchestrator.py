@@ -304,7 +304,7 @@ class AgentOrchestrator:
         agent_def = self._resolve_agent(agent_id)
         if not agent_def:
             return []
-        return await self.run_parallel_researchers(
+        results = await self.run_parallel_researchers(
             session=session,
             broadcast=broadcast,
             agent_def=agent_def,
@@ -313,6 +313,17 @@ class AgentOrchestrator:
             timeout=timeout,
             max_workers=max_workers or self._config.max_parallel_researchers,
         )
+        merged = self.merge_parallel_research_results(results)
+        await broadcast("research.completed", {
+            "parent_agent_id": agent_def.agent_id,
+            "task": task,
+            "merged_text": merged.text,
+            "successful_sources": merged.successful_sources,
+            "timed_out_sources": merged.timed_out_sources,
+            "errored_sources": merged.errored_sources,
+            "result_count": len(results),
+        })
+        return results
 
     async def run_parallel_researchers(
         self,
@@ -339,6 +350,14 @@ class AgentOrchestrator:
 
         async def run_one(researcher: AgentDefinition) -> ParallelResearchResult:
             async with semaphore:
+                base_payload = {
+                    "agent_id": researcher.agent_id,
+                    "agent_name": researcher.name,
+                    "role": researcher.role,
+                    "parent_agent_id": agent_def.agent_id,
+                    "task": task,
+                }
+                await broadcast("research.started", base_payload)
                 try:
                     result_text = await asyncio.wait_for(
                         self._run_delegated_agent(
@@ -351,6 +370,12 @@ class AgentOrchestrator:
                         ),
                         timeout=timeout,
                     )
+                    await broadcast("research.result", {
+                        **base_payload,
+                        "text": result_text,
+                        "timed_out": False,
+                        "error": None,
+                    })
                     return ParallelResearchResult(
                         text=result_text,
                         metadata={
@@ -361,6 +386,12 @@ class AgentOrchestrator:
                         },
                     )
                 except asyncio.TimeoutError:
+                    await broadcast("research.failed", {
+                        **base_payload,
+                        "text": "",
+                        "timed_out": True,
+                        "error": "timed out",
+                    })
                     return ParallelResearchResult(
                         text="",
                         metadata={
@@ -372,6 +403,12 @@ class AgentOrchestrator:
                         error="timed out",
                     )
                 except Exception as exc:
+                    await broadcast("research.failed", {
+                        **base_payload,
+                        "text": "",
+                        "timed_out": False,
+                        "error": str(exc),
+                    })
                     return ParallelResearchResult(
                         text="",
                         metadata={
