@@ -27,6 +27,13 @@
 - `metadata.timed_out`：该 researcher 是否超时。
 - `error`：超时或异常信息。
 
+`AgentOrchestrator.merge_parallel_research_results(...)` 是确定性合并入口。它接收 `list[ParallelResearchResult]`，不调用 LLM，返回 `MergedResearchResult`：
+
+- `text`：可直接展示或交给后续主 Agent 的合并文本。
+- `successful_sources`：进入正文合并的 researcher id 列表。
+- `timed_out_sources`：超时 researcher id 列表。
+- `errored_sources`：异常 researcher id 列表。
+
 ## Researcher 选择策略
 
 第一版会从 `AgentStore.list_agents()` 中选择 `role == "researcher"` 的 Agent，并排除父 Agent 自己。如果没有独立 researcher，而父 Agent 本身就是 researcher，则允许以父 Agent 定义运行一个只读 worker。
@@ -42,14 +49,14 @@
 
 ## 合并策略
 
-当前版本还不生成最终合并回答。调用方可以把非空的 `result.text` 当作合并候选，并通过 `metadata` 保留来源。
-
-后续确定性合并层建议按这个顺序处理：
+当前版本已经提供不依赖 LLM 的确定性合并层，按固定规则组织结果：
 
 1. 保留每条结果对应的 researcher id。
 2. 过滤空文本的超时或失败结果，不把它们送入正文合并。
 3. 保留超时和异常元数据，给 UI 或日志展示。
-4. 再由父 Agent 或 planner 汇总一致结论、冲突点和引用文件。
+4. 生成稳定文本，后续可再交给父 Agent 或 planner 做语义总结。
+
+合并层不会判断结论是否冲突，也不会重写 researcher 的文本；它只做来源分组、状态保留和稳定格式化。
 
 ## 超时策略
 
@@ -62,4 +69,4 @@
 - 不开启自动写入。
 - researcher worker 不允许执行 shell 命令。
 - 父会话可以累计 delegated agent 的 token usage，但子 worker 不能 stage 文件改动。
-- UI 接入和最终 LLM 合并仍留到后续步骤。
+- UI 接入和最终 LLM 语义总结仍留到后续步骤。

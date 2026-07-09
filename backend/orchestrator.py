@@ -20,7 +20,7 @@ from backend.llm.client import LLMClient
 from backend.safety.file_staging import FileStagingArea
 from backend.safety.permission import PermissionManager
 from backend.tools import ALL_TOOLS, resolve_tools
-from backend.types import AgentDefinition, AgentResult, ParallelResearchResult, Phase, Session, ToolContext
+from backend.types import AgentDefinition, AgentResult, MergedResearchResult, ParallelResearchResult, Phase, Session, ToolContext
 
 logger = logging.getLogger(__name__)
 
@@ -398,6 +398,50 @@ class AgentOrchestrator:
                     error=str(item),
                 ))
         return results
+
+    @staticmethod
+    def merge_parallel_research_results(
+        results: list[ParallelResearchResult],
+    ) -> MergedResearchResult:
+        """确定性合并 researcher 结果，不调用 LLM。"""
+        successful_sections: list[str] = []
+        successful_sources: list[str] = []
+        timed_out_sources: list[str] = []
+        errored_sources: list[str] = []
+
+        for result in results:
+            source = str(result.metadata.get("source") or "unknown")
+            if result.metadata.get("timed_out"):
+                timed_out_sources.append(source)
+                continue
+            if result.error:
+                errored_sources.append(source)
+                continue
+
+            text = result.text.strip()
+            if text:
+                successful_sources.append(source)
+                successful_sections.append(f"### {source}\n{text}")
+
+        if successful_sections:
+            merged_text = "\n\n".join(successful_sections)
+        else:
+            merged_text = "没有可合并的 researcher 结果。"
+
+        status_lines: list[str] = []
+        if timed_out_sources:
+            status_lines.append("超时 researcher：" + ", ".join(timed_out_sources))
+        if errored_sources:
+            status_lines.append("异常 researcher：" + ", ".join(errored_sources))
+        if status_lines:
+            merged_text = merged_text + "\n\n---\n" + "\n".join(status_lines)
+
+        return MergedResearchResult(
+            text=merged_text,
+            successful_sources=successful_sources,
+            timed_out_sources=timed_out_sources,
+            errored_sources=errored_sources,
+        )
 
     async def _run_delegated_agent(
         self,

@@ -214,3 +214,13 @@ class ParallelResearchResult:
     text: str
     metadata: dict
     error: str | None = None
+
+
+@dataclass
+class MergedResearchResult:
+    """多 researcher 结果的确定性合并产物。"""
+
+    text: str
+    successful_sources: list[str]
+    timed_out_sources: list[str]
+    errored_sources: list[str]

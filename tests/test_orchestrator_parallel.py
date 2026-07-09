@@ -194,3 +194,37 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
 
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].metadata["source"], "researcher")
+
+    def test_merge_parallel_research_results_keeps_status_metadata(self) -> None:
+        merged = AgentOrchestrator.merge_parallel_research_results([
+            ParallelResearchResult(
+                text="alpha conclusion",
+                metadata={"source": "alpha", "timed_out": False},
+            ),
+            ParallelResearchResult(
+                text="",
+                metadata={"source": "slow", "timed_out": True},
+                error="timed out",
+            ),
+            ParallelResearchResult(
+                text="",
+                metadata={"source": "broken", "timed_out": False},
+                error="boom",
+            ),
+        ])
+
+        self.assertIn("### alpha", merged.text)
+        self.assertIn("alpha conclusion", merged.text)
+        self.assertIn("超时 researcher：slow", merged.text)
+        self.assertIn("异常 researcher：broken", merged.text)
+        self.assertEqual(merged.successful_sources, ["alpha"])
+        self.assertEqual(merged.timed_out_sources, ["slow"])
+        self.assertEqual(merged.errored_sources, ["broken"])
+
+    def test_merge_parallel_research_results_handles_empty_input(self) -> None:
+        merged = AgentOrchestrator.merge_parallel_research_results([])
+
+        self.assertEqual(merged.text, "没有可合并的 researcher 结果。")
+        self.assertEqual(merged.successful_sources, [])
+        self.assertEqual(merged.timed_out_sources, [])
+        self.assertEqual(merged.errored_sources, [])
