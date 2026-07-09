@@ -971,7 +971,7 @@ class AgentOrchestrator:
 
         cleaned = re.sub(r"[`*_#>\[\](){}]", "", text).strip()
         cleaned = re.sub(r"\s+", " ", cleaned)
-        cleaned = re.sub(r"^(请|帮我|麻烦|能不能|可以)?\s*", "", cleaned)
+        cleaned = re.sub(r"^(?:(?:请|帮我|麻烦|能不能|可以)\s*)+", "", cleaned)
         if not cleaned:
             cleaned = work_dir.name or "新会话"
         if len(cleaned) > 24:

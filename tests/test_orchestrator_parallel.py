@@ -451,3 +451,35 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
         self.assertIn("超时来源：slow", summary)
         self.assertIn("异常来源：broken", summary)
         self.assertTrue(summary.endswith("\n... (parallel research summary truncated)"))
+
+    def test_generate_session_title_from_first_user_message(self) -> None:
+        session = Session(id="title-session", work_dir=Path("D:/example-project"))
+
+        self.assertTrue(AgentOrchestrator._should_generate_title(session))
+        title = AgentOrchestrator._generate_session_title(
+            "请帮我修复左侧栏会话标题显示问题，并补测试",
+            session.work_dir,
+        )
+
+        self.assertEqual(title, "修复左侧栏会话标题显示问题，并补测试")
+
+    def test_should_not_replace_project_or_user_session_title(self) -> None:
+        project_session = Session(
+            id="project-title-session",
+            work_dir=Path("D:/coding_teamwork"),
+            title="coding_teamwork",
+        )
+        user_session = Session(
+            id="user-title-session",
+            work_dir=Path("D:/coding_teamwork"),
+            title="左侧栏 UI 优化",
+        )
+        placeholder_session = Session(
+            id="placeholder-title-session",
+            work_dir=Path("D:/coding_teamwork"),
+            title="Session 04:07",
+        )
+
+        self.assertFalse(AgentOrchestrator._should_generate_title(project_session))
+        self.assertFalse(AgentOrchestrator._should_generate_title(user_session))
+        self.assertTrue(AgentOrchestrator._should_generate_title(placeholder_session))

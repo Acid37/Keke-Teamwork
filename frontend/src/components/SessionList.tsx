@@ -15,6 +15,7 @@ export function SessionList({ appearance, onAppearanceChange }: SessionListProps
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
 
   const handleNewSession = () => {
+    if (!state.workDir) return;
     dispatch({ type: 'CLEAR_MESSAGES' });
     initSession(null, state.workDir);
   };
@@ -60,7 +61,12 @@ export function SessionList({ appearance, onAppearanceChange }: SessionListProps
     <div className="sidebar">
       <div className="sidebar-header">
         <h2>会话</h2>
-        <button className="btn-icon" onClick={handleNewSession} title="新建会话">
+        <button
+          className="btn-icon"
+          onClick={handleNewSession}
+          title={state.workDir ? '新建会话' : '请先打开项目'}
+          disabled={!state.workDir}
+        >
           <Plus size={18} />
         </button>
       </div>
