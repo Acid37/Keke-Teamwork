@@ -209,6 +209,8 @@ class AgentResult:
 
 @dataclass
 class ParallelResearchResult:
+    """单个 researcher 的研究结果和调度元数据。"""
+
     text: str
     metadata: dict
     error: str | None = None

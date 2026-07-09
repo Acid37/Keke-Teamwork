@@ -278,7 +278,29 @@ class AgentOrchestrator:
         timeout: float | None = None,
         max_workers: int | None = None,
     ) -> list[ParallelResearchResult]:
-        """Run the first read-only parallel research pass for a user task."""
+        """兼容入口：运行一次只读并行研究。优先使用 run_parallel_research。"""
+        return await self.run_parallel_research(
+            session=session,
+            task=task,
+            context=context,
+            agent_id=agent_id,
+            broadcast=broadcast,
+            timeout=timeout,
+            max_workers=max_workers,
+        )
+
+    async def run_parallel_research(
+        self,
+        *,
+        session: Session,
+        task: str,
+        context: str = "",
+        agent_id: str = "main",
+        broadcast: Broadcast,
+        timeout: float | None = None,
+        max_workers: int | None = None,
+    ) -> list[ParallelResearchResult]:
+        """面向会话流程的只读并行研究入口。"""
         agent_def = self._resolve_agent(agent_id)
         if not agent_def:
             return []
@@ -303,7 +325,7 @@ class AgentOrchestrator:
         timeout: float | None = None,
         max_workers: int = 3,
     ) -> list[ParallelResearchResult]:
-        """Run available researcher agents concurrently with read-only tools."""
+        """并发运行可用的 researcher Agent，且只允许只读工具。"""
         max_workers = max(1, max_workers)
         candidates = [
             candidate
@@ -387,12 +409,11 @@ class AgentOrchestrator:
         task: str,
         context: str = "",
     ) -> str:
-        """Run a delegated sub-agent and return a compact summary.
+        """运行一个委派子 Agent，并返回紧凑摘要。
 
-        First version is intentionally read-only: delegated agents only receive
-        read/search/list tools, even if their stored definition grants more.
-        This avoids write conflicts until the orchestrator has explicit handoff
-        and conflict handling.
+        第一版刻意保持只读：即使 Agent 定义里包含更多权限，委派 Agent
+        也只会拿到读文件、搜索和列目录工具。这样在明确 handoff 与冲突处理
+        机制前，可以避免并发写入冲突。
         """
         agent_def = self._agent_store.get_agent(agent_id)
         if not agent_def:

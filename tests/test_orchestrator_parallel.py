@@ -167,3 +167,30 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
             self.assertEqual(len(calls), 1)
             self.assertEqual(calls[0]["parent_agent_id"], "main")
             self.assertEqual(calls[0]["agent_id"], "researcher")
+
+    async def test_parallel_research_alias_uses_clear_entry_name(self) -> None:
+        main = make_agent("main", role="assistant")
+        researcher = make_agent("researcher")
+        orchestrator = AgentOrchestrator(
+            config=AppConfig(),
+            llm=object(),
+            agent_store=FakeStore([main, researcher]),
+            permission_managers={},
+        )
+        session = Session(id="clear-name-session", work_dir=Path("."))
+        broadcast = FakeBroadcast()
+
+        async def fake_delegated_agent(**kwargs) -> str:
+            return f"findings from {kwargs['agent_id']}"
+
+        orchestrator._run_delegated_agent = fake_delegated_agent  # type: ignore[method-assign]
+
+        results = await orchestrator.run_parallel_research(
+            session=session,
+            broadcast=broadcast,
+            agent_id="main",
+            task="inspect clear entry name",
+        )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].metadata["source"], "researcher")

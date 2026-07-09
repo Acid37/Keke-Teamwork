@@ -1,18 +1,18 @@
-## Summary
+## 摘要
 
-- Add a backend-only parallel researcher orchestration slice.
-- Keep delegated researcher execution read-only.
-- Add unit coverage for concurrent execution and per-worker timeout handling.
+- 新增后端只读并行 researcher 编排雏形。
+- researcher 子任务继续走只读委派路径。
+- 补充并发执行、单 worker 超时和默认 researcher 调度测试。
 
-## Testing
+## 测试
 
 - [ ] `python -m unittest -v`
 
-## Safety
+## 安全边界
 
-- Research workers use read/search/list tools only.
-- No automatic file writes, edits, or console execution are enabled in this slice.
+- researcher worker 只允许 read/search/list 工具。
+- 当前版本不启用自动文件写入、编辑或命令执行。
 
-## Notes
+## 备注
 
-- Merge synthesis and UI integration are intentionally left for a follow-up change.
+- 最终结果合并和 UI 接入留到后续变更。
