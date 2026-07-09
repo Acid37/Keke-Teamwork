@@ -10,6 +10,9 @@ import {
   AgentStatusPayload,
   AgentStartedPayload,
   AgentCompletedPayload,
+  ResearchStartedPayload,
+  ResearchResultPayload,
+  ResearchCompletedPayload,
   ToolCallPayload,
   ConsoleOutputPayload,
   FilesChangedPayload,
@@ -112,6 +115,18 @@ function normalizeHistory(history: any[] | undefined): Message[] {
       thinking: item.thinking,
       timestamp: typeof item.timestamp === 'number' ? item.timestamp : Date.now(),
     }));
+}
+
+function addSystemMessage(dispatch: React.Dispatch<Action>, content: string): void {
+  dispatch({
+    type: 'ADD_MESSAGE',
+    message: {
+      id: generateId(),
+      role: 'system',
+      content,
+      timestamp: Date.now(),
+    },
+  });
 }
 
 function reducer(state: SessionState, action: Action): SessionState {
@@ -528,6 +543,30 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
     ws.on('agent.completed', (payload: AgentCompletedPayload) => {
       dispatch({ type: 'AGENT_COMPLETED', agentId: payload.agent_id });
+    });
+
+    ws.on('research.started', (payload: ResearchStartedPayload) => {
+      addSystemMessage(dispatch, `Researcher ${payload.agent_name} 开始研究：${payload.task}`);
+    });
+
+    ws.on('research.result', (payload: ResearchResultPayload) => {
+      const text = payload.text?.trim() || '(无文本结果)';
+      addSystemMessage(dispatch, `Researcher ${payload.agent_name} 返回结果：\n\n${text}`);
+    });
+
+    ws.on('research.failed', (payload: ResearchResultPayload) => {
+      const reason = payload.timed_out ? '超时' : (payload.error || '未知错误');
+      addSystemMessage(dispatch, `Researcher ${payload.agent_name} 失败：${reason}`);
+    });
+
+    ws.on('research.completed', (payload: ResearchCompletedPayload) => {
+      const status = [
+        `完成 ${payload.result_count} 个 researcher`,
+        payload.successful_sources.length ? `成功：${payload.successful_sources.join(', ')}` : '',
+        payload.timed_out_sources.length ? `超时：${payload.timed_out_sources.join(', ')}` : '',
+        payload.errored_sources.length ? `异常：${payload.errored_sources.join(', ')}` : '',
+      ].filter(Boolean).join('；');
+      addSystemMessage(dispatch, `并行研究完成：${status}\n\n${payload.merged_text}`);
     });
 
     ws.on('error', (payload: ErrorPayload) => {

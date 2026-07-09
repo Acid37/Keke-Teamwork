@@ -87,6 +87,30 @@ export interface AgentCompletedPayload {
   usage: { input_tokens: number; output_tokens: number };
 }
 
+export interface ResearchStartedPayload {
+  agent_id: string;
+  agent_name: string;
+  role: string;
+  parent_agent_id: string;
+  task: string;
+}
+
+export interface ResearchResultPayload extends ResearchStartedPayload {
+  text: string;
+  timed_out: boolean;
+  error: string | null;
+}
+
+export interface ResearchCompletedPayload {
+  parent_agent_id: string;
+  task: string;
+  merged_text: string;
+  successful_sources: string[];
+  timed_out_sources: string[];
+  errored_sources: string[];
+  result_count: number;
+}
+
 export interface ToolCallPayload {
   name: string;
   args: Record<string, any>;
