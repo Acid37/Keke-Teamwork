@@ -34,6 +34,7 @@
   /* Shape */
   --radius-xs: 6px;
   --radius-sm: 8px;
+  --radius-md: 10px;
   --radius: 12px;
   --radius-lg: 16px;
   --radius-xl: 24px;
@@ -173,9 +174,9 @@ body {
   align-items: center;
   gap: 8px;
   padding: 8px 8px 8px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background var(--duration-short), color var(--duration-short);
   margin-bottom: 2px;
 }
 
@@ -184,7 +185,7 @@ body {
 }
 
 .session-item.active {
-  background: var(--accent-dim);
+  background: color-mix(in srgb, var(--accent-dim) 68%, transparent);
 }
 
 .session-item-main {
@@ -2954,7 +2955,7 @@ body {
   cursor: pointer;
   text-align: left;
   font: inherit;
-  transition: background var(--duration-short);
+  transition: background var(--duration-short), color var(--duration-short);
 }
 
 .session-group-header:hover {
@@ -3020,7 +3021,7 @@ body {
   color: var(--text-muted);
   cursor: pointer;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   flex-shrink: 0;
   transition: all var(--duration-short);
 }
