@@ -34,6 +34,25 @@
 - `timed_out_sources`：超时 researcher id 列表。
 - `errored_sources`：异常 researcher id 列表。
 
+`AgentOrchestrator.run_user_message(...)` 已经受控接入并行研究。触发条件保持保守：
+
+- `session.solo_mode == False`
+- 当前父 Agent 不是 researcher
+- `AgentStore` 中存在独立 researcher
+
+当前接入只负责广播和展示 researcher 结果，不直接改写 main Agent 最终回答。
+
+## 广播事件
+
+并行研究会通过既有 WebSocket broadcast 回调发送以下事件：
+
+- `research.started`：单个 researcher 开始执行。
+- `research.result`：单个 researcher 成功返回文本。
+- `research.failed`：单个 researcher 超时或异常。
+- `research.completed`：整批 researcher 完成，包含确定性合并结果。
+
+事件 payload 保留 `agent_id`、`agent_name`、`role`、`parent_agent_id`、`task`、`timed_out`、`error` 等字段，方便前端区分来源和状态。
+
 ## Researcher 选择策略
 
 第一版会从 `AgentStore.list_agents()` 中选择 `role == "researcher"` 的 Agent，并排除父 Agent 自己。如果没有独立 researcher，而父 Agent 本身就是 researcher，则允许以父 Agent 定义运行一个只读 worker。
@@ -69,4 +88,9 @@
 - 不开启自动写入。
 - researcher worker 不允许执行 shell 命令。
 - 父会话可以累计 delegated agent 的 token usage，但子 worker 不能 stage 文件改动。
-- UI 接入和最终 LLM 语义总结仍留到后续步骤。
+- 前端当前把 researcher 事件展示为独立系统消息，不混入普通 assistant 文本流。
+- 最终 LLM 语义总结仍留到后续步骤。
+
+## 下一步
+
+下一阶段应设计“研究摘要注入 main Agent 上下文”的最小方案。建议只注入确定性合并后的紧凑摘要，并设置长度上限，避免 researcher 原文导致上下文膨胀。
