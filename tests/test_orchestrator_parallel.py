@@ -13,6 +13,9 @@ from backend.orchestrator import AgentOrchestrator
 from backend.types import AgentDefinition, AgentResult, ParallelResearchResult, Session, TokenUsage, ToolContext
 
 
+LAST_MAIN_AGENT_CALL: dict = {}
+
+
 class FakeBroadcast:
     def __init__(self) -> None:
         self.events: list[tuple[str, dict]] = []
@@ -71,6 +74,11 @@ class MainFlowFakeAgent:
         on_tool_call,
         on_tool_result,
     ) -> AgentResult:
+        LAST_MAIN_AGENT_CALL.clear()
+        LAST_MAIN_AGENT_CALL.update({
+            "user_message": user_message,
+            "existing_messages": existing_messages,
+        })
         await on_text("main response")
         return AgentResult(
             text="main response",
@@ -163,7 +171,7 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
 
         orchestrator._run_delegated_agent = fake_delegated_agent  # type: ignore[method-assign]
 
-        results = await orchestrator.run_parallel_research(
+        merged = await orchestrator.run_parallel_research(
             session=session,
             broadcast=broadcast,
             agent_id="main",
@@ -171,7 +179,9 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
             context="unit test",
         )
 
-        self.assertEqual(len(results), 2)
+        self.assertCountEqual(merged.successful_sources, ["alpha", "beta"])
+        self.assertIn("### alpha", merged.text)
+        self.assertIn("### beta", merged.text)
         event_types = [event_type for event_type, _ in broadcast.events]
         self.assertEqual(event_types.count("research.started"), 2)
         self.assertEqual(event_types.count("research.result"), 2)
@@ -231,14 +241,14 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
 
         orchestrator._run_delegated_agent = fake_delegated_agent  # type: ignore[method-assign]
 
-        results = await orchestrator.run_parallel_entry(
+        merged = await orchestrator.run_parallel_entry(
             session=session,
             broadcast=broadcast,
             agent_id="main",
             task="inspect worker limit",
         )
 
-        self.assertEqual(len(results), 2)
+        self.assertCountEqual(merged.successful_sources, ["alpha", "beta"])
         self.assertEqual(max_active, 1)
 
     async def test_parallel_entry_uses_default_agent_store_researcher(self) -> None:
@@ -262,7 +272,7 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
 
             orchestrator._run_delegated_agent = fake_delegated_agent  # type: ignore[method-assign]
 
-            results = await orchestrator.run_parallel_entry(
+            merged = await orchestrator.run_parallel_entry(
                 session=session,
                 broadcast=broadcast,
                 agent_id="main",
@@ -270,11 +280,8 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
                 context="real AgentStore defaults",
             )
 
-            self.assertEqual(len(results), 1)
-            self.assertEqual(results[0].metadata["source"], "researcher")
-            self.assertEqual(results[0].metadata["role"], "researcher")
-            self.assertFalse(results[0].metadata["timed_out"])
-            self.assertEqual(results[0].text, "default findings from researcher")
+            self.assertEqual(merged.successful_sources, ["researcher"])
+            self.assertIn("default findings from researcher", merged.text)
             self.assertEqual(len(calls), 1)
             self.assertEqual(calls[0]["parent_agent_id"], "main")
             self.assertEqual(calls[0]["agent_id"], "researcher")
@@ -296,15 +303,15 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
 
         orchestrator._run_delegated_agent = fake_delegated_agent  # type: ignore[method-assign]
 
-        results = await orchestrator.run_parallel_research(
+        merged = await orchestrator.run_parallel_research(
             session=session,
             broadcast=broadcast,
             agent_id="main",
             task="inspect clear entry name",
         )
 
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].metadata["source"], "researcher")
+        self.assertEqual(merged.successful_sources, ["researcher"])
+        self.assertIn("findings from researcher", merged.text)
 
     async def test_run_user_message_triggers_parallel_research_when_not_solo(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -337,6 +344,15 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
         self.assertIn("research.result", event_types)
         self.assertIn("research.completed", event_types)
         self.assertIn("agent.completed", event_types)
+        self.assertIn("inspect the project", LAST_MAIN_AGENT_CALL["user_message"])
+        self.assertIn("[Parallel Research Summary]", LAST_MAIN_AGENT_CALL["user_message"])
+        self.assertIn("findings from researcher", LAST_MAIN_AGENT_CALL["user_message"])
+        self.assertEqual(
+            LAST_MAIN_AGENT_CALL["existing_messages"][-1]["content"],
+            LAST_MAIN_AGENT_CALL["user_message"],
+        )
+        self.assertEqual(session.messages[0]["content"], "inspect the project")
+        self.assertNotIn("[Parallel Research Summary]", session.messages[0]["content"])
 
     async def test_run_user_message_skips_parallel_research_in_solo_mode(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -368,6 +384,8 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
         self.assertNotIn("research.started", event_types)
         self.assertNotIn("research.completed", event_types)
         self.assertIn("agent.completed", event_types)
+        self.assertEqual(LAST_MAIN_AGENT_CALL["user_message"], "inspect the project")
+        self.assertNotIn("[Parallel Research Summary]", LAST_MAIN_AGENT_CALL["user_message"])
 
     def test_merge_parallel_research_results_keeps_status_metadata(self) -> None:
         merged = AgentOrchestrator.merge_parallel_research_results([
@@ -402,3 +420,34 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
         self.assertEqual(merged.successful_sources, [])
         self.assertEqual(merged.timed_out_sources, [])
         self.assertEqual(merged.errored_sources, [])
+
+    def test_research_summary_for_agent_includes_status_and_truncates(self) -> None:
+        merged = AgentOrchestrator.merge_parallel_research_results([
+            ParallelResearchResult(
+                text="alpha conclusion " * 20,
+                metadata={"source": "alpha", "timed_out": False},
+            ),
+            ParallelResearchResult(
+                text="",
+                metadata={"source": "slow", "timed_out": True},
+                error="timed out",
+            ),
+            ParallelResearchResult(
+                text="",
+                metadata={"source": "broken", "timed_out": False},
+                error="boom",
+            ),
+        ])
+
+        summary = AgentOrchestrator._format_research_summary_for_agent(
+            task="inspect summary",
+            merged=merged,
+            max_chars=240,
+        )
+
+        self.assertIn("[Parallel Research Summary]", summary)
+        self.assertIn("原始任务：inspect summary", summary)
+        self.assertIn("成功来源：alpha", summary)
+        self.assertIn("超时来源：slow", summary)
+        self.assertIn("异常来源：broken", summary)
+        self.assertTrue(summary.endswith("\n... (parallel research summary truncated)"))

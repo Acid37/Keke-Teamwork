@@ -95,14 +95,19 @@ class AgentOrchestrator:
             "color": agent_def.color,
         })
 
+        research_summary = ""
         if self._should_run_parallel_research(session, agent_def):
             try:
-                await self.run_parallel_research(
+                merged_research = await self.run_parallel_research(
                     session=session,
                     task=text,
                     context="用户消息进入主 Agent 前的只读研究。",
                     agent_id=agent_def.agent_id,
                     broadcast=broadcast,
+                )
+                research_summary = self._format_research_summary_for_agent(
+                    task=text,
+                    merged=merged_research,
                 )
             except Exception as exc:
                 logger.exception("Parallel research preflight failed")
@@ -191,10 +196,19 @@ class AgentOrchestrator:
         )
 
         try:
+            agent_user_message = self._build_agent_user_message(
+                user_text=text,
+                research_summary=research_summary,
+            )
+            agent_existing_messages = [
+                *session.messages[:-1],
+                {"role": "user", "content": agent_user_message},
+            ]
+
             result = await agent.run(
-                user_message=text,
+                user_message=agent_user_message,
                 tool_context=tool_context,
-                existing_messages=session.messages[:-1],
+                existing_messages=agent_existing_messages,
                 max_tool_rounds=agent_def.max_tool_rounds,
                 on_text=lambda t: broadcast("agent.text", {
                     "text": t,
@@ -216,6 +230,11 @@ class AgentOrchestrator:
             )
 
             session.messages = result.messages
+            if research_summary and session.messages:
+                for message in reversed(session.messages):
+                    if message.get("role") == "user" and message.get("content") == agent_user_message:
+                        message["content"] = text
+                        break
             session.usage_total += result.usage
             session.phase = Phase.READY
 
@@ -299,7 +318,7 @@ class AgentOrchestrator:
         broadcast: Broadcast,
         timeout: float | None = None,
         max_workers: int | None = None,
-    ) -> list[ParallelResearchResult]:
+    ) -> MergedResearchResult:
         """兼容入口：运行一次只读并行研究。优先使用 run_parallel_research。"""
         return await self.run_parallel_research(
             session=session,
@@ -321,11 +340,11 @@ class AgentOrchestrator:
         broadcast: Broadcast,
         timeout: float | None = None,
         max_workers: int | None = None,
-    ) -> list[ParallelResearchResult]:
+    ) -> MergedResearchResult:
         """面向会话流程的只读并行研究入口。"""
         agent_def = self._resolve_agent(agent_id)
         if not agent_def:
-            return []
+            return self.merge_parallel_research_results([])
         results = await self.run_parallel_researchers(
             session=session,
             broadcast=broadcast,
@@ -345,7 +364,7 @@ class AgentOrchestrator:
             "errored_sources": merged.errored_sources,
             "result_count": len(results),
         })
-        return results
+        return merged
 
     async def run_parallel_researchers(
         self,
@@ -501,6 +520,34 @@ class AgentOrchestrator:
             timed_out_sources=timed_out_sources,
             errored_sources=errored_sources,
         )
+
+    @staticmethod
+    def _build_agent_user_message(*, user_text: str, research_summary: str) -> str:
+        if not research_summary:
+            return user_text
+        return f"{user_text.rstrip()}\n\n{research_summary}"
+
+    @staticmethod
+    def _format_research_summary_for_agent(
+        *,
+        task: str,
+        merged: MergedResearchResult,
+        max_chars: int = 12_000,
+    ) -> str:
+        """Format bounded read-only findings for the main Agent context."""
+        summary = (
+            "[Parallel Research Summary]\n"
+            "这些是只读 researcher 在主 Agent 执行前得到的参考结论；"
+            "请结合项目实际情况判断，不要把它们当成已完成修改。\n\n"
+            f"原始任务：{task.strip()}\n\n"
+            f"成功来源：{', '.join(merged.successful_sources) or '(none)'}\n"
+            f"超时来源：{', '.join(merged.timed_out_sources) or '(none)'}\n"
+            f"异常来源：{', '.join(merged.errored_sources) or '(none)'}\n\n"
+            f"{merged.text.strip() or '没有可合并的 researcher 结果。'}"
+        )
+        if len(summary) <= max_chars:
+            return summary
+        return summary[:max_chars] + "\n... (parallel research summary truncated)"
 
     async def _run_delegated_agent(
         self,
