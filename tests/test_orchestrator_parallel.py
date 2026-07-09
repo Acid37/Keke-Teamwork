@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import time
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest import IsolatedAsyncioTestCase
 
+from backend.agent_store import AgentStore
 from backend.config import AppConfig
 from backend.orchestrator import AgentOrchestrator
 from backend.types import AgentDefinition, ParallelResearchResult, Session
@@ -127,3 +129,41 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
 
         self.assertEqual(len(results), 2)
         self.assertEqual(max_active, 1)
+
+    async def test_parallel_entry_uses_default_agent_store_researcher(self) -> None:
+        with TemporaryDirectory() as tmp:
+            data_dir = Path(tmp)
+            store = AgentStore(data_dir)
+            config = AppConfig(data_dir=data_dir)
+            orchestrator = AgentOrchestrator(
+                config=config,
+                llm=object(),
+                agent_store=store,
+                permission_managers={},
+            )
+            session = Session(id="default-store-session", work_dir=data_dir)
+            broadcast = FakeBroadcast()
+            calls: list[dict] = []
+
+            async def fake_delegated_agent(**kwargs) -> str:
+                calls.append(kwargs)
+                return f"default findings from {kwargs['agent_id']}"
+
+            orchestrator._run_delegated_agent = fake_delegated_agent  # type: ignore[method-assign]
+
+            results = await orchestrator.run_parallel_entry(
+                session=session,
+                broadcast=broadcast,
+                agent_id="main",
+                task="inspect default agents",
+                context="real AgentStore defaults",
+            )
+
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0].metadata["source"], "researcher")
+            self.assertEqual(results[0].metadata["role"], "researcher")
+            self.assertFalse(results[0].metadata["timed_out"])
+            self.assertEqual(results[0].text, "default findings from researcher")
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0]["parent_agent_id"], "main")
+            self.assertEqual(calls[0]["agent_id"], "researcher")
