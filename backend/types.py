@@ -205,3 +205,10 @@ class AgentResult:
     tool_calls_history: list[dict]
     usage: TokenUsage
     messages: list[dict]
+
+
+@dataclass
+class ParallelResearchResult:
+    text: str
+    metadata: dict
+    error: str | None = None

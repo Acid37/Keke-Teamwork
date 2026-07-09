@@ -20,7 +20,7 @@ from backend.llm.client import LLMClient
 from backend.safety.file_staging import FileStagingArea
 from backend.safety.permission import PermissionManager
 from backend.tools import ALL_TOOLS, resolve_tools
-from backend.types import AgentDefinition, AgentResult, Phase, Session, ToolContext
+from backend.types import AgentDefinition, AgentResult, ParallelResearchResult, Phase, Session, ToolContext
 
 logger = logging.getLogger(__name__)
 
@@ -266,6 +266,116 @@ class AgentOrchestrator:
 
         finally:
             self._permission_managers.pop(session.id, None)
+
+    async def run_parallel_entry(
+        self,
+        *,
+        session: Session,
+        task: str,
+        context: str = "",
+        agent_id: str = "main",
+        broadcast: Broadcast,
+        timeout: float | None = None,
+        max_workers: int | None = None,
+    ) -> list[ParallelResearchResult]:
+        """Run the first read-only parallel research pass for a user task."""
+        agent_def = self._resolve_agent(agent_id)
+        if not agent_def:
+            return []
+        return await self.run_parallel_researchers(
+            session=session,
+            broadcast=broadcast,
+            agent_def=agent_def,
+            task=task,
+            context=context,
+            timeout=timeout,
+            max_workers=max_workers or self._config.max_parallel_researchers,
+        )
+
+    async def run_parallel_researchers(
+        self,
+        *,
+        session: Session,
+        broadcast: Broadcast,
+        agent_def: AgentDefinition,
+        task: str,
+        context: str = "",
+        timeout: float | None = None,
+        max_workers: int = 3,
+    ) -> list[ParallelResearchResult]:
+        """Run available researcher agents concurrently with read-only tools."""
+        max_workers = max(1, max_workers)
+        candidates = [
+            candidate
+            for candidate in self._agent_store.list_agents()
+            if candidate.role == "researcher" and candidate.agent_id != agent_def.agent_id
+        ]
+        if not candidates and agent_def.role == "researcher":
+            candidates = [agent_def]
+
+        semaphore = asyncio.Semaphore(max_workers)
+
+        async def run_one(researcher: AgentDefinition) -> ParallelResearchResult:
+            async with semaphore:
+                try:
+                    result_text = await asyncio.wait_for(
+                        self._run_delegated_agent(
+                            session=session,
+                            broadcast=broadcast,
+                            parent_agent_id=agent_def.agent_id,
+                            agent_id=researcher.agent_id,
+                            task=task,
+                            context=context,
+                        ),
+                        timeout=timeout,
+                    )
+                    return ParallelResearchResult(
+                        text=result_text,
+                        metadata={
+                            "source": researcher.agent_id,
+                            "agent_name": researcher.name,
+                            "role": researcher.role,
+                            "timed_out": False,
+                        },
+                    )
+                except asyncio.TimeoutError:
+                    return ParallelResearchResult(
+                        text="",
+                        metadata={
+                            "source": researcher.agent_id,
+                            "agent_name": researcher.name,
+                            "role": researcher.role,
+                            "timed_out": True,
+                        },
+                        error="timed out",
+                    )
+                except Exception as exc:
+                    return ParallelResearchResult(
+                        text="",
+                        metadata={
+                            "source": researcher.agent_id,
+                            "agent_name": researcher.name,
+                            "role": researcher.role,
+                            "timed_out": False,
+                        },
+                        error=str(exc),
+                    )
+
+        gathered = await asyncio.gather(
+            *(run_one(researcher) for researcher in candidates),
+            return_exceptions=True,
+        )
+        results: list[ParallelResearchResult] = []
+        for item in gathered:
+            if isinstance(item, ParallelResearchResult):
+                results.append(item)
+            elif isinstance(item, Exception):
+                results.append(ParallelResearchResult(
+                    text="",
+                    metadata={"source": "unknown", "timed_out": False},
+                    error=str(item),
+                ))
+        return results
 
     async def _run_delegated_agent(
         self,
