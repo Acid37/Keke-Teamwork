@@ -19,6 +19,7 @@ from backend.config import AppConfig
 from backend.llm.client import LLMClient
 from backend.safety.file_staging import FileStagingArea
 from backend.safety.permission import PermissionManager
+from backend.session import SessionStore
 from backend.tools import ALL_TOOLS, resolve_tools
 from backend.types import AgentDefinition, AgentResult, MergedResearchResult, ParallelResearchResult, Phase, Session, ToolContext
 
@@ -42,11 +43,13 @@ class AgentOrchestrator:
         llm: LLMClient,
         agent_store: AgentStore,
         permission_managers: dict[str, PermissionManager],
+        session_store: SessionStore | None = None,
     ):
         self._config = config
         self._llm = llm
         self._agent_store = agent_store
         self._permission_managers = permission_managers
+        self._session_store = session_store
 
     async def run_user_message(
         self,
@@ -1010,6 +1013,8 @@ class AgentOrchestrator:
             if len(title) > 48:
                 title = title[:48].rstrip() + "…"
             session.title = title
+            if self._session_store:
+                self._session_store.save(session)
             await broadcast("session.title.updated", {
                 "session_id": session.id,
                 "title": title,

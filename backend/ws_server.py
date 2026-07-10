@@ -70,6 +70,7 @@ class WebSocketServer:
             llm=self._llm,
             agent_store=self._agent_store,
             permission_managers=self._permission_managers,
+            session_store=self._store,
         )
 
     def create_app(self) -> FastAPI:

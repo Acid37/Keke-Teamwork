@@ -1,192 +1,49 @@
 # SESSION AGENDA
 
-目标：记录 `feature/orchestrator-parallel` 当前进展，并为下一步多 Agent 协作继续留出清晰入口。
+分支：`feature/orchestrator-parallel`  
+日期：2026-07-10
 
-## 当前已完成
+## 已完成
 
-- [x] 创建 `feature/orchestrator-parallel` 分支。
-- [x] 新增快速 CI，执行 `python -m unittest -v`。
+- [x] 快速 CI，执行 `python -m unittest -v`。
 - [x] 修复默认 unittest 发现路径。
-- [x] 在 `AgentOrchestrator` 中加入并行 researcher 入口。
+- [x] 并行 researcher 调度入口（`Semaphore` 限并发、超时隔离）。
 - [x] researcher worker 保持只读工具边界。
-- [x] 加入单 worker 超时、异常隔离和部分结果返回。
-- [x] 加入默认 `AgentStore` researcher 分发覆盖。
-- [x] 增加确定性合并层 `merge_parallel_research_results(...)`。
-- [x] 更新中文设计文档和 PR 模板。
-- [x] 后端广播 `research.started` / `research.result` / `research.failed` / `research.completed`。
+- [x] 确定性合并层 `merge_parallel_research_results(...)`。
+- [x] `research.*` 生命周期事件广播。
 - [x] 非 Solo 主流程受控触发只读并行研究。
-- [x] 前端将 researcher 事件展示为独立系统消息。
-- [x] 最新测试结果：`python -m unittest -v`，13 个测试全部通过。
-- [x] 最新前端验证：`npm run build` 通过。
+- [x] 前端展示 researcher 事件。
+- [x] Research summary 注入 main Agent 上下文（12k 字符上限，Solo 不注入）。
+- [x] 会话历史不污染：摘要只进主 Agent 上下文，持久消息保留用户原文。
+- [x] 安全 handoff：`delegate_agent` 对 coder 走串行 handoff，复用 staging/permission。
+- [x] handoff 禁止嵌套委派。
+- [x] `handoff.*` 事件和前端展示。
+- [x] LLM 语义标题生成（异步、算法 fallback）。
+- [x] 独立 `title_model` 配置（可选轻量模型）。
+- [x] 标题持久化（LLM 生成后存入 SessionStore）。
+- [x] 会话创建保护（无项目时禁用新建会话）。
+- [x] 左侧栏圆角修复（`--radius-md` token 补全）。
+- [x] 单窗口启动（`start.bat` 前台运行）。
+- [x] 当前测试：`python -m unittest -v`，21 个测试通过。
+- [x] 当前前端：`npm run build` 通过。
 
-## 等待确认的下一步
+## 下一步
 
-后端事件、主流程受控接入和前端最小展示已经落地。下一步建议进入“研究结果如何被 main Agent 使用”的设计与实现，但仍保持只读 researcher 边界。
+### 短期
 
-1. 后端广播事件设计
-	- 已定义 researcher 生命周期事件：`research.started`、`research.result`、`research.completed`、`research.failed`。
-	- 每个事件需要包含 `agent_id`、`agent_name`、`role`、`parent_agent_id`、`task`、`timed_out`、`error` 等稳定字段。
-	- 暂不把 researcher 输出混入主 Agent 的最终回答，先作为独立事件展示和记录。
+1. **前端时间线结构化** — 把 research/handoff 事件从系统消息升级为独立 timeline 视图。
+2. **事件持久化** — research/handoff 事件存入 session，刷新后不丢失。
+3. **基础模块测试** — `SessionStore`、`AppConfig`、`PermissionManager`、`FileStagingArea`、`EditTool`。
 
-2. 主流程受控接入
-	- 已在 `session.solo_mode == False`、存在 researcher Agent、父 Agent 不是 researcher 时触发。
-	- 初版可以先广播合并结果，不改变 main Agent 的回答逻辑。
-	- 保持并行 researcher 只读，不开放写文件、编辑文件或执行命令。
+### 中期
 
-3. 前端展示接入
-	- 已在聊天时间线中以系统消息展示 researcher 开始、结果、超时、异常和整批完成状态。
-	- researcher 输出应和 main Agent 输出区分来源。
-	- 前端展示完成前，后端事件字段不要频繁变更。
-
-4. 下一步：研究结果进入 main Agent 上下文
-	- 设计一个紧凑的 research summary 注入方式，避免把所有 researcher 原文塞进上下文。
-	- 建议先只注入 `research.completed.merged_text` 的截断摘要，并标明来源和失败状态。
-	- 需要测试 main Agent 收到的 `existing_messages` 或 user prompt 中包含研究摘要，同时不影响 Solo 模式。
-
-5. 手动验证路径
-	- 增加开发用 mock 或脚本，验证非 solo 模式下 researcher 事件顺序。
-	- 单元测试继续避免真实 LLM/API 调用。
-
-6. 工作树整理
-	- 当前有未纳入本特性提交的文档改动：`docs/ROADMAP.md`、`docs/SESSION_AGENDA.md`。
-	- `docs/ROADMAP.md` 是否提交需要单独确认。
-	- 本文件用于记录下一步计划，可在用户确认后作为文档提交。
+4. **安全策略细分** — 命令风险分级、只读白名单、路径边界保护。
+5. **reviewer 审查流** — coder handoff 完成后自动触发 reviewer。
+6. **Checkpoint 历史回滚** — 接入已定义的 `Checkpoint` / `FileSnapshot`。
 
 ## 暂不做
 
-- 暂不允许并行 researcher 写文件。
-- 暂不加入真实 LLM 调用测试。
-- 暂不实现复杂语义总结或冲突判断。
-- 暂不重构完整 timeline/session 持久化模型。
-- 暂不把 researcher 原始全文无节制注入 main Agent 上下文。
-
-## 下一次开工建议
-
-从“研究结果进入 main Agent 上下文”开始。开工前先确认摘要注入格式和长度限制，避免并行研究让模型上下文快速膨胀。
-
-## 下一阶段计划：Research Summary 注入
-
-目标：让 main Agent 真正参考并行 researcher 的合并结论，但继续避免上下文膨胀和权限扩大。
-
-### 建议实现
-
-1. 增加摘要格式化函数
-	- 输入 `MergedResearchResult` 和原始任务。
-	- 输出紧凑的 `[Parallel Research Summary]` 文本。
-	- 包含成功来源、超时来源、异常来源和合并正文。
-
-2. 增加长度限制
-	- 先使用固定字符上限，例如 8k 或 12k。
-	- 超出后截断，并在摘要末尾标记已截断。
-	- 不把每个 researcher 原始全文无节制塞给 main Agent。
-
-3. 接入 main Agent 调用
-	- 非 Solo 模式下，先执行 researcher，再把摘要作为额外上下文交给 main Agent。
-	- Solo 模式保持完全不注入。
-	- 初版不改变前端事件协议，只改变 main Agent 可见上下文。
-
-4. 补测试
-	- 非 Solo 模式下 main Agent 能收到 research summary。
-	- Solo 模式不注入 summary。
-	- 超时和异常来源会出现在 summary 中。
-	- 超长摘要会被截断。
-	- 测试继续使用 fake Agent，不调用真实 LLM/API。
-
-### 验收标准
-
-- [ ] main Agent 的输入中包含紧凑 research summary。
-- [ ] Solo 模式不触发 researcher，也不注入 summary。
-- [ ] summary 有明确长度上限。
-- [ ] researcher 仍保持只读工具边界。
-- [ ] `python -m unittest -v` 通过。
-
-### 推荐提交
-
-1. `Feed research summary into main agent`
-2. `Document research summary handoff`
-
-## 实施规划
-
-### 阶段 1：后端事件协议
-
-目标：先把 researcher 生命周期事件定清楚，给后续主流程和前端一个稳定协议。
-
-改动范围：
-
-- 阅读 `backend/ws_server.py` 中现有广播事件格式。
-- 阅读前端 WebSocket 消费路径，确认当前事件命名和字段约定。
-- 在后端定义 researcher 事件 payload，优先保持普通 `dict`，暂不引入复杂事件系统。
-- 补测试，验证事件字段包含来源、父 Agent、任务、状态和错误信息。
-
-建议事件：
-
-- `research.started`：某个 researcher 开始执行。
-- `research.result`：某个 researcher 返回结果。
-- `research.failed`：某个 researcher 异常或超时。
-- `research.completed`：整批 researcher 完成，并包含确定性合并摘要。
-
-验收标准：
-
-- [x] 事件字段稳定，前端可以直接消费。
-- [x] 超时和异常不会中断整批事件广播。
-- [x] 单元测试不依赖真实 LLM/API。
-
-### 阶段 2：主流程受控接入
-
-目标：让非 Solo 模式下的用户消息可以触发并行研究，但不破坏现有 main Agent 回答链路。
-
-改动范围：
-
-- 在 `AgentOrchestrator.run_user_message()` 中增加受控触发点。
-- 触发条件先保持保守：`session.solo_mode == False`、存在 researcher、当前父 Agent 不是 researcher。
-- 初版只广播 researcher 结果和合并摘要，不直接改写 main Agent 最终回答。
-- 补 solo / non-solo 测试，确认现有单 Agent 行为不变。
-
-验收标准：
-
-- [x] Solo 模式完全沿用现有路径。
-- [x] 非 Solo 模式能触发 researcher 事件。
-- [x] researcher 仍只使用只读工具。
-- [x] `python -m unittest -v` 通过。
-
-### 阶段 3：前端展示
-
-目标：让用户看得见 researcher 在工作，并能区分 main Agent 与 researcher 输出。
-
-改动范围：
-
-- 在 WebSocket client/type 中补 researcher 事件类型。
-- 在会话状态中保存 researcher 事件或转换成 timeline 项。
-- 增加轻量 UI：开始、成功、超时、失败、整批完成状态。
-- researcher 输出先作为独立记录展示，不混入 assistant 普通消息。
-
-验收标准：
-
-- [x] 前端能展示 researcher 来源和状态。
-- [x] 超时/失败有明确状态，不显示成普通成功回答。
-- [x] main Agent 消息展示不回退。
-
-### 阶段 4：验证和提交
-
-目标：完成最小可演示链路，并保持每一步可回滚。
-
-改动范围：
-
-- 增加开发用 mock 或测试夹具，验证事件顺序。
-- 每个逻辑阶段单独提交。
-- 每次提交前运行 `python -m unittest -v`。
-- 前端接入后补一次本地运行和基本交互检查。
-
-验收标准：
-
-- [x] 后端测试绿色。
-- [x] 前端类型检查或构建通过。
-- [x] 文档同步更新。
-- [x] 不误提交无关文件，尤其是 `docs/ROADMAP.md` 的既有改动。
-
-### 推荐提交顺序
-
-1. `Define research broadcast events`
-2. `Wire parallel research into orchestrator flow`
-3. `Show researcher events in frontend`
-4. `Document parallel research integration`
+- 不允许并行 researcher 写文件。
+- 不加入真实 LLM/API 调用测试。
+- 不重构完整 timeline/session 持久化模型（先做事件持久化）。
+- 不把 researcher 原始全文无节制注入 main Agent 上下文。
