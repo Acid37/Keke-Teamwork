@@ -176,7 +176,7 @@ class AgentOrchestrator:
 
         async def run_child_agent(agent_id: str, task: str, context: str = "") -> str:
             child_def = self._agent_store.get_agent(agent_id)
-            if child_def and child_def.role != "researcher":
+            if child_def and self._has_write_tools(child_def):
                 return await self._run_handoff_agent(
                     session=session,
                     broadcast=broadcast,
@@ -404,14 +404,14 @@ class AgentOrchestrator:
         timeout: float | None = None,
         max_workers: int = 3,
     ) -> list[ParallelResearchResult]:
-        """并发运行可用的 researcher Agent，且只允许只读工具。"""
+        """并发运行可用的只读 Agent，且只允许只读工具。"""
         max_workers = max(1, max_workers)
         candidates = [
             candidate
             for candidate in self._agent_store.list_agents()
-            if candidate.role == "researcher" and candidate.agent_id != agent_def.agent_id
+            if self._is_read_only_agent(candidate) and candidate.agent_id != agent_def.agent_id
         ]
-        if not candidates and agent_def.role == "researcher":
+        if not candidates and self._is_read_only_agent(agent_def):
             candidates = [agent_def]
 
         semaphore = asyncio.Semaphore(max_workers)
@@ -919,20 +919,50 @@ class AgentOrchestrator:
     def _resolve_agent(self, agent_id: str) -> AgentDefinition | None:
         return self._agent_store.get_agent(agent_id) or self._agent_store.get_agent("main")
 
+    # ─── Tool classification ───
+
+    READ_ONLY_TOOLS = frozenset({
+        "read_file", "grep_search", "find_files", "list_directory",
+    })
+    WRITE_TOOLS = frozenset({
+        "write_file", "edit_file", "run_console",
+    })
+
+    @classmethod
+    def _is_read_only_agent(cls, agent_def: AgentDefinition) -> bool:
+        """An agent is read-only if it has no write/shell tools."""
+        return not any(t in cls.WRITE_TOOLS for t in agent_def.tools)
+
+    @classmethod
+    def _has_write_tools(cls, agent_def: AgentDefinition) -> bool:
+        """An agent has write capability if it owns any write/shell tool."""
+        return any(t in cls.WRITE_TOOLS for t in agent_def.tools)
+
     def _should_run_parallel_research(
         self,
         session: Session,
         agent_def: AgentDefinition,
     ) -> bool:
-        """判断当前用户消息是否应触发只读并行研究。"""
-        if session.solo_mode or agent_def.role == "researcher":
+        """判断当前用户消息是否应触发只读并行研究。
+
+        按工具权限判断而非角色名：只要存在其他只读 Agent 可作为
+        researcher 候选，就触发并行研究。
+        """
+        if session.solo_mode:
             return False
         return any(
-            candidate.role == "researcher" and candidate.agent_id != agent_def.agent_id
+            self._is_read_only_agent(candidate) and candidate.agent_id != agent_def.agent_id
             for candidate in self._agent_store.list_agents()
         )
 
     def _resolve_model(self, agent_def: AgentDefinition) -> str:
+        """Resolve the effective model for an agent.
+
+        Priority: agent_def.model → global role-based fallback → main_model.
+        Role-based fallbacks (research_model, coder_model) are convenience
+        defaults only — any custom role with its own model field takes
+        precedence.
+        """
         if agent_def.model:
             return agent_def.model
         if agent_def.role == "researcher" and self._config.research_model:

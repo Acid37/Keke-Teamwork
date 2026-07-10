@@ -586,3 +586,33 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
         self.assertEqual(session.title, "轻量标题")
         title_events = [e for e in broadcast.events if e[0] == "session.title.updated"]
         self.assertEqual(len(title_events), 1)
+
+    def test_tool_based_role_classification(self) -> None:
+        """Agent 分流应基于工具权限而非角色名。"""
+        read_only_custom = AgentDefinition(
+            agent_id="analyst",
+            name="数据分析师",
+            role="analyst",
+            tools=["read_file", "grep_search", "find_files", "list_directory"],
+        )
+        write_custom = AgentDefinition(
+            agent_id="writer",
+            name="文档撰写师",
+            role="writer",
+            tools=["read_file", "write_file", "edit_file"],
+        )
+        mixed = AgentDefinition(
+            agent_id="hybrid",
+            name="混合角色",
+            role="custom",
+            tools=["read_file", "run_console"],
+        )
+
+        self.assertTrue(AgentOrchestrator._is_read_only_agent(read_only_custom))
+        self.assertFalse(AgentOrchestrator._has_write_tools(read_only_custom))
+
+        self.assertFalse(AgentOrchestrator._is_read_only_agent(write_custom))
+        self.assertTrue(AgentOrchestrator._has_write_tools(write_custom))
+
+        self.assertFalse(AgentOrchestrator._is_read_only_agent(mixed))
+        self.assertTrue(AgentOrchestrator._has_write_tools(mixed))
