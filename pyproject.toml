@@ -3,7 +3,7 @@ requires = ["setuptools>=75.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "coding-teamwork"
+name = "keke-teamwork"
 version = "0.1.0"
 description = "A self-developed teamwork coding agent"
 requires-python = ">=3.11"

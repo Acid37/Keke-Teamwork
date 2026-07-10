@@ -1,12 +1,12 @@
-# Coding Teamwork
+# Keke Teamwork
 
 > 一个自研的本地多 Agent 协作工作台：用 Web UI 管理项目、会话、模型、自定义 Agent 角色，并通过工具调用帮助你阅读、搜索、修改和运行本地代码。
 
-Coding Teamwork 当前处于 **v0.2** 阶段。它已经具备单 Agent 编码助手、文件变更审查、命令审批、会话持久化、自定义 Agent 管理、只读多 Agent 并行研究、安全 handoff、LLM 语义标题和工具权限分流。
+Keke Teamwork 当前处于 **v0.2** 阶段。它已经具备单 Agent 编码助手、文件变更审查、命令审批、会话持久化、自定义 Agent 管理、只读多 Agent 并行研究、安全 handoff、LLM 语义标题和工具权限分流。
 
 ## 当前定位
 
-Coding Teamwork 不是普通聊天壳，也还不是完整成熟的多 Agent IDE。当前更准确的定位是：
+Keke Teamwork 不是普通聊天壳，也还不是完整成熟的多 Agent IDE。当前更准确的定位是：
 
 > **一个可运行的本地多 Agent 协作工作台，支持自定义角色、工具权限分流和 LLM 语义标题。**
 
@@ -202,7 +202,7 @@ CT_CONSOLE_TIMEOUT
 用户配置、会话、Agent 定义和壁纸等数据默认保存在：
 
 ```text
-~/.coding-teamwork
+~/.keke-teamwork
 ```
 
 其中包括：

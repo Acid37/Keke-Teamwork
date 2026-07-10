@@ -37,7 +37,7 @@ class AppConfig:
     max_parallel_researchers: int = 6
 
     # ─── Paths ───
-    data_dir: Path = field(default_factory=lambda: Path.home() / ".coding-teamwork")
+    data_dir: Path = field(default_factory=lambda: Path.home() / ".keke-teamwork")
 
     @property
     def config_file(self) -> Path:
@@ -78,7 +78,7 @@ class AppConfig:
     @classmethod
     def _load_from_file(cls) -> AppConfig:
         """Load from JSON config file. Returns defaults if file doesn't exist."""
-        default_dir = Path.home() / ".coding-teamwork"
+        default_dir = Path.home() / ".keke-teamwork"
         config_path = default_dir / "config.json"
         if not config_path.exists():
             return cls()
@@ -150,7 +150,7 @@ class AppearanceConfig:
 
     @property
     def config_file(self) -> Path:
-        data_dir = Path.home() / ".coding-teamwork"
+        data_dir = Path.home() / ".keke-teamwork"
         return data_dir / "appearance.json"
 
     @classmethod

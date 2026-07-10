@@ -1,8 +1,8 @@
-# Coding Teamwork 路线图
+# Keke Teamwork 路线图
 
 > 版本：v0.2  
 > 日期：2026-07-10  
-> 当前定位：本地多 Agent coding teamwork 工作台，已具备只读研究、安全 handoff 和 LLM 语义标题。
+> 当前定位：本地多 Agent 协作工作台，已具备只读研究、安全 handoff、工具权限分流和 LLM 语义标题。
 
 ## 当前状态
 

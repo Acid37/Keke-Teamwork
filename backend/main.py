@@ -36,7 +36,7 @@ def main():
         custom = os.getenv("CT_RELOAD_DIR", "").strip()
         reload_dirs = [custom] if custom else [backend_dir]
 
-    print(f"Starting Coding Teamwork server on {config.host}:{config.port}")
+    print(f"Starting Keke Teamwork server on {config.host}:{config.port}")
     print(f"  Provider: {config.provider}")
     print(f"  Model:    {config.main_model}")
     print(f"  Base URL: {config.base_url}")

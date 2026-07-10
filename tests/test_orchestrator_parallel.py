@@ -466,17 +466,17 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
     def test_should_not_replace_project_or_user_session_title(self) -> None:
         project_session = Session(
             id="project-title-session",
-            work_dir=Path("D:/coding_teamwork"),
-            title="coding_teamwork",
+            work_dir=Path("D:/keke_teamwork"),
+            title="keke_teamwork",
         )
         user_session = Session(
             id="user-title-session",
-            work_dir=Path("D:/coding_teamwork"),
+            work_dir=Path("D:/keke_teamwork"),
             title="左侧栏 UI 优化",
         )
         placeholder_session = Session(
             id="placeholder-title-session",
-            work_dir=Path("D:/coding_teamwork"),
+            work_dir=Path("D:/keke_teamwork"),
             title="Session 04:07",
         )
 

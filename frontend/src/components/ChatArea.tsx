@@ -41,7 +41,7 @@ export function ChatArea() {
     return (
       <div className="chat-area">
         <div className="chat-welcome">
-          <h1 className="welcome-title">Coding Teamwork</h1>
+          <h1 className="welcome-title">Keke Teamwork</h1>
           <p className="welcome-subtitle">自研的多 Agent 编码助手 · 打开本地项目开始工作</p>
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
             <button className="text-btn primary" style={{ padding: '10px 24px', fontSize: 14, fontWeight: 600 }} onClick={() => setShowDirPicker(true)}>

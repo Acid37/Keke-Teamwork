@@ -75,7 +75,7 @@ class WebSocketServer:
 
     def create_app(self) -> FastAPI:
         """Create the FastAPI app with WebSocket endpoint."""
-        app = FastAPI(title="Coding Teamwork")
+        app = FastAPI(title="Keke Teamwork")
 
         app.add_middleware(
             CORSMiddleware,

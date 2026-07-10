@@ -31,6 +31,7 @@ pnpm-debug.log*
 # Local app state
 .cache/
 .coding-teamwork/
+.keke-teamwork/
 
 # Environment / secrets
 .env
