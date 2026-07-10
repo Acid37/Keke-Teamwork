@@ -64,6 +64,13 @@ class AgentOrchestrator:
         session.messages.append({"role": "user", "content": text})
         if self._should_generate_title(session):
             session.title = self._generate_session_title(text, session.work_dir)
+            asyncio.create_task(
+                self._update_title_with_llm(
+                    session=session,
+                    user_text=text,
+                    broadcast=broadcast,
+                )
+            )
 
         # Phase B placeholder: solo mode keeps current behavior explicit.
         if session.solo_mode:
@@ -966,7 +973,11 @@ class AgentOrchestrator:
 
     @staticmethod
     def _generate_session_title(text: str, work_dir) -> str:
-        """Create a short deterministic title from the first user message."""
+        """Create a short deterministic title from the first user message.
+
+        This is the instant fallback used before the async LLM title update
+        completes (or when the LLM call fails).
+        """
         import re
 
         cleaned = re.sub(r"[`*_#>\[\](){}]", "", text).strip()
@@ -977,6 +988,61 @@ class AgentOrchestrator:
         if len(cleaned) > 24:
             cleaned = cleaned[:24].rstrip() + "…"
         return cleaned
+
+    async def _update_title_with_llm(
+        self,
+        *,
+        session: Session,
+        user_text: str,
+        broadcast: Broadcast,
+    ) -> None:
+        """Asynchronously generate a semantic session title via LLM.
+
+        Uses the main LLM client (no dedicated title model). Falls back to
+        the algorithmic title on any error. Broadcasts ``session.title.updated``
+        so the frontend can refresh the sidebar without a full reload.
+        """
+        try:
+            title = await self._call_llm_for_title(user_text)
+            title = (title or "").strip().strip('"\'""''')
+            if not title:
+                return
+            if len(title) > 48:
+                title = title[:48].rstrip() + "…"
+            session.title = title
+            await broadcast("session.title.updated", {
+                "session_id": session.id,
+                "title": title,
+            })
+        except Exception:
+            logger.debug("LLM title generation failed, keeping fallback", exc_info=True)
+
+    async def _call_llm_for_title(self, user_text: str) -> str:
+        """Call the main LLM to produce a concise session title.
+
+        Reuses ``self._llm`` (the main model client). Uses a short system
+        prompt and low max_tokens to keep it cheap. Returns the raw title
+        string; caller handles cleanup and fallback.
+        """
+        system_prompt = (
+            "你是一个会话标题生成器。根据用户的第一条消息，生成一个简洁的中文会话标题。"
+            "要求：不超过 20 个字，不要引号，不要句号，概括用户意图。"
+            "只返回标题文本，不要任何解释或前缀。"
+        )
+        title = ""
+        async for event in self._llm.chat(
+            messages=[{"role": "user", "content": user_text[:2000]}],
+            system=system_prompt,
+            model=self._config.main_model,
+            max_tokens=64,
+            temperature=0.3,
+            stream=True,
+        ):
+            if event.text_delta:
+                title += event.text_delta
+            if event.finish:
+                break
+        return title
 
     @staticmethod
     def _build_system_prompt(session: Session) -> str:

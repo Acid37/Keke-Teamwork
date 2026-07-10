@@ -483,3 +483,67 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
         self.assertFalse(AgentOrchestrator._should_generate_title(project_session))
         self.assertFalse(AgentOrchestrator._should_generate_title(user_session))
         self.assertTrue(AgentOrchestrator._should_generate_title(placeholder_session))
+
+    async def test_llm_title_generation_updates_session_and_broadcasts(self) -> None:
+        from backend.types import StreamEvent
+
+        main = make_agent("main", role="assistant")
+        orchestrator = AgentOrchestrator(
+            config=AppConfig(),
+            llm=object(),
+            agent_store=FakeStore([main]),
+            permission_managers={},
+        )
+        session = Session(id="llm-title-session", work_dir=Path("D:/proj"), title="Session 04:07")
+        broadcast = FakeBroadcast()
+
+        async def fake_chat(*, messages, system=None, model=None, max_tokens=64, temperature=0.3, stream=True, **kw):
+            yield StreamEvent(text_delta="修复左侧栏圆角")
+            yield StreamEvent(finish=True)
+
+        class FakeLLM:
+            async def chat(self, **kwargs):
+                async for event in fake_chat(**kwargs):
+                    yield event
+
+        orchestrator._llm = FakeLLM()  # type: ignore[assignment]
+
+        await orchestrator._update_title_with_llm(
+            session=session,
+            user_text="请帮我修复左侧栏圆角问题",
+            broadcast=broadcast,
+        )
+
+        self.assertEqual(session.title, "修复左侧栏圆角")
+        title_events = [e for e in broadcast.events if e[0] == "session.title.updated"]
+        self.assertEqual(len(title_events), 1)
+        self.assertEqual(title_events[0][1]["session_id"], "llm-title-session")
+        self.assertEqual(title_events[0][1]["title"], "修复左侧栏圆角")
+
+    async def test_llm_title_generation_falls_back_on_error(self) -> None:
+        main = make_agent("main", role="assistant")
+        orchestrator = AgentOrchestrator(
+            config=AppConfig(),
+            llm=object(),
+            agent_store=FakeStore([main]),
+            permission_managers={},
+        )
+        session = Session(id="fallback-title-session", work_dir=Path("D:/proj"), title="修复左侧栏…")
+        broadcast = FakeBroadcast()
+
+        class BrokenLLM:
+            async def chat(self, **kwargs):
+                raise RuntimeError("API unavailable")
+                yield  # noqa: unreachable — make it an async generator
+
+        orchestrator._llm = BrokenLLM()  # type: ignore[assignment]
+
+        await orchestrator._update_title_with_llm(
+            session=session,
+            user_text="请帮我修复左侧栏圆角问题",
+            broadcast=broadcast,
+        )
+
+        self.assertEqual(session.title, "修复左侧栏…")
+        title_events = [e for e in broadcast.events if e[0] == "session.title.updated"]
+        self.assertEqual(len(title_events), 0)

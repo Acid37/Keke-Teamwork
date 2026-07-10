@@ -64,6 +64,7 @@ type Action =
   | { type: 'SET_CONNECTED'; connected: boolean }
   | { type: 'SET_PROCESSING'; isProcessing: boolean }
   | { type: 'SET_SESSIONS'; sessions: SessionInfo[] }
+  | { type: 'UPDATE_SESSION_TITLE'; sessionId: string; title: string }
   | { type: 'CLEAR_MESSAGES' }
   | { type: 'SET_STREAMING_ID'; messageId: string | null }
   | { type: 'AGENT_STARTED'; agent: ActiveAgent }
@@ -233,6 +234,14 @@ function reducer(state: SessionState, action: Action): SessionState {
     case 'SET_SESSIONS':
       return { ...state, sessions: action.sessions };
 
+    case 'UPDATE_SESSION_TITLE':
+      return {
+        ...state,
+        sessions: state.sessions.map((s) =>
+          s.session_id === action.sessionId ? { ...s, title: action.title } : s
+        ),
+      };
+
     case 'CLEAR_MESSAGES':
       return { ...state, messages: [], streamingMessageId: null };
 
@@ -348,6 +357,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
     ws.on('session.list', (payload: SessionListPayload) => {
       dispatch({ type: 'SET_SESSIONS', sessions: payload.sessions });
+    });
+
+    ws.on('session.title.updated', (payload: { session_id: string; title: string }) => {
+      dispatch({ type: 'UPDATE_SESSION_TITLE', sessionId: payload.session_id, title: payload.title });
     });
 
     ws.on('session.ready', (payload: SessionReadyPayload) => {
