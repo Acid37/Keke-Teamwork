@@ -1,14 +1,14 @@
 # Coding Teamwork
 
-> 一个自研的本地 Coding Agent 工作台：用 Web UI 管理项目、会话、模型、Agent 角色，并通过工具调用帮助你阅读、搜索、修改和运行本地代码。
+> 一个自研的本地多 Agent 协作工作台：用 Web UI 管理项目、会话、模型、自定义 Agent 角色，并通过工具调用帮助你阅读、搜索、修改和运行本地代码。
 
-Coding Teamwork 当前处于 **v0.2** 阶段。它已经具备单 Agent 编码助手、文件变更审查、命令审批、会话持久化、Agent 管理、只读多 Agent researcher 协作、安全 handoff 和 LLM 语义标题。
+Coding Teamwork 当前处于 **v0.2** 阶段。它已经具备单 Agent 编码助手、文件变更审查、命令审批、会话持久化、自定义 Agent 管理、只读多 Agent 并行研究、安全 handoff、LLM 语义标题和工具权限分流。
 
 ## 当前定位
 
 Coding Teamwork 不是普通聊天壳，也还不是完整成熟的多 Agent IDE。当前更准确的定位是：
 
-> **一个可运行的本地多 Agent coding teamwork 工作台，已支持只读研究、安全 handoff 和 LLM 语义标题。**
+> **一个可运行的本地多 Agent 协作工作台，支持自定义角色、工具权限分流和 LLM 语义标题。**
 
 它适合用来：
 
@@ -17,6 +17,7 @@ Coding Teamwork 不是普通聊天壳，也还不是完整成熟的多 Agent IDE
 - 在执行终端命令前请求用户审批
 - 查看 Agent 写入文件后的 diff
 - 管理不同 Agent 角色、模型、工具权限和提示词
+- 创建任意自定义角色（不限于预设角色），按工具权限自动分流
 - 在非 Solo 模式下尝试并行 researcher 只读探索代码库
 - 尝试 OpenAI-compatible / Anthropic / Gemini 等模型提供方
 
@@ -33,24 +34,27 @@ Coding Teamwork 不是普通聊天壳，也还不是完整成熟的多 Agent IDE
 - **YOLO / Auto Review / Solo 模式**：可控制命令审批、diff 展示和是否强制单 Agent。
 - **会话持久化**：会话存储在用户目录下，支持恢复历史项目与会话。
 - **模型配置**：支持 OpenAI 兼容接口、Anthropic 和 Gemini，并提供常见 OpenAI-compatible 服务商预设。
-- **Agent 管理**：可创建和编辑 Agent 定义，包括名称、角色、模型、温度、工具列表、最大工具轮次和系统提示词。
+- **Agent 管理**：可创建和编辑任意自定义 Agent 定义，包括名称、角色、模型、温度、工具列表、最大工具轮次和系统提示词。角色不限于预设名称，任何角色都能独立配置模型。
+- **工具权限分流**：Agent 分流（只读研究 vs 安全 handoff）基于工具权限自动判断，不再依赖角色名。只有只读工具的 Agent 走并行研究路径，有写工具的 Agent 走安全 handoff 路径。
 - **外观设置**：支持主题色、暗色/亮色/自动模式、字体大小和壁纸。
 - **Orchestrator 编排入口**：`AgentOrchestrator` 已接管用户消息执行路径，并保持 Solo 模式兼容。
 - **只读委派**：`delegate_agent` 可把聚焦子任务委派给其他 Agent，默认限制为读文件、搜索和列目录。
 - **并行 researcher**：非 Solo 模式下可受控触发多个 researcher 并发探索，受 `max_parallel_researchers` 限制。
 - **Research summary 注入**：researcher 合并结论以受限摘要注入 main Agent 上下文，12k 字符上限，Solo 模式不注入。
-- **安全 handoff**：`delegate_agent` 对 coder 等非 researcher 角色走串行 handoff，复用主流程 staging/permission 边界，禁止嵌套委派。
+- **安全 handoff**：`delegate_agent` 对有写工具的 Agent 走串行 handoff，复用主流程 staging/permission 边界，禁止嵌套委派。
 - **Handoff 事件展示**：前端展示 `handoff.started` / `handoff.completed` / `handoff.failed`。
 - **LLM 语义标题**：异步 LLM 生成会话标题，支持独立 `title_model` 配置（可选轻量模型），算法 fallback。
 - **单窗口启动**：`start.bat` 前台单窗口运行，关闭窗口即停服务。
-- **基础测试与 CI**：已补充委派、并行 researcher、handoff、标题生成和主流程守卫测试；CI 执行 `python -m unittest -v`。
+- **基础测试与 CI**：已补充委派、并行研究、handoff、标题生成、工具权限分类和主流程守卫测试；CI 执行 `python -m unittest -v`。
 
 ### 计划支持
 
+- 工具可插拔分类注册（coding/search/file/shell/mcp），为非 coding 场景预留
+- MCP 工具接入
+- 首次启动 Setup Wizard
 - 前端多 Agent 时间线结构化展示
 - research/handoff 事件持久化
-- reviewer 审查流（research → plan → code → review 闭环）
-- 更细粒度的安全策略和高危命令识别
+- 安全策略分层（命令风险分级、只读白名单、路径边界保护）
 - Checkpoint 历史回滚系统
 - 基础模块独立测试（SessionStore、PermissionManager、FileStagingArea 等）
 
@@ -178,7 +182,7 @@ CT_CONSOLE_TIMEOUT
 | YOLO | 跳过命令审批，直接执行 shell 命令。请谨慎开启。 |
 | Solo | 强制使用 main Agent，为未来多 Agent 编排预留。 |
 
-关闭 Solo 后，当前分支会在存在 researcher Agent 时先运行只读并行研究，把合并摘要注入 main Agent 上下文，并把 researcher 状态作为独立消息展示。main Agent 也可以通过 `delegate_agent` 把写入任务安全 handoff 给 coder，coder 复用主流程的 staging/permission 边界，但不能嵌套委派。
+关闭 Solo 后，当前分支会在存在只读 Agent 时先运行只读并行研究，把合并摘要注入 main Agent 上下文，并把研究状态作为独立消息展示。main Agent 也可以通过 `delegate_agent` 把写入任务安全 handoff 给有写工具的 Agent，该 Agent 复用主流程的 staging/permission 边界，但不能嵌套委派。分流基于工具权限自动判断，不依赖角色名。
 
 ## 可用工具
 
@@ -191,7 +195,7 @@ CT_CONSOLE_TIMEOUT
 | `grep_search` | 使用正则搜索文件内容。 |
 | `find_files` | 按名称模式查找文件。 |
 | `list_directory` | 列出目录树。 |
-| `delegate_agent` | 将子任务委派给其他 Agent；researcher 走只读路径，coder 走安全 handoff。 |
+| `delegate_agent` | 将子任务委派给其他 Agent；只读 Agent 走并行研究路径，有写工具的 Agent 走安全 handoff。 |
 
 ## 数据存储
 
@@ -225,15 +229,15 @@ CT_CONSOLE_TIMEOUT
 
 当前优先级：
 
-1. 前端多 Agent 时间线结构化展示。
-2. research/handoff 事件持久化。
-3. 安全策略细分（命令风险分级、只读白名单、路径边界）。
-4. reviewer 审查流。
+1. 工具可插拔分类注册，为非 coding 场景预留。
+2. MCP 工具接入。
+3. 前端多 Agent 时间线结构化展示。
+4. 安全策略分层（命令风险分级、只读白名单、路径边界）。
 5. 基础模块测试补全。
 
 当前已验证：
 
-- `python -m unittest -v`：21 个测试通过。
+- `python -m unittest -v`：22 个测试通过。
 - `npm run build`：前端构建通过。
 
 ## 许可证
