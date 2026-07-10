@@ -6,7 +6,7 @@ chcp 65001 >nul
 
 echo.
 echo  ═══════════════════════════════════════
-echo        Coding Teamwork  v0.1
+echo        Coding Teamwork  v0.2
 echo  ═══════════════════════════════════════
 echo.
 
@@ -40,12 +40,29 @@ if not exist frontend\node_modules (
     popd
 )
 
-REM ── 构建前端 ──
-echo  [3/3] 构建前端页面...
-pushd frontend
-call npm run build || (popd & echo  [错误] 构建失败 & pause & exit /b 1)
-popd
-echo        构建完成
+REM ── 构建前端（仅当 dist 不存在或源码更新时）──
+set NEED_BUILD=0
+if not exist frontend\dist\index.html (
+    set NEED_BUILD=1
+)
+if exist frontend\dist\index.html (
+    REM 比较 src 和 dist 的时间戳
+    for /f "delims=" %%T in ('dir /s /b /o-d frontend\src\*.tsx frontend\src\*.ts frontend\src\*.css 2^>nul ^| findstr /r ".*" ^| findstr /n "^" ^| findstr "^1:"') do (
+        for /f "tokens=1* delims=:" %%A in ("%%T") do set NEWEST_SRC=%%B
+    )
+    for %%F in (frontend\dist\index.html) do set DIST_TIME=%%~tF
+    for %%F in (!NEWEST_SRC!) do set SRC_TIME=%%~tF
+    if !SRC_TIME! gtr !DIST_TIME! set NEED_BUILD=1
+)
+if !NEED_BUILD!==1 (
+    echo  [3/3] 构建前端页面...
+    pushd frontend
+    call npm run build || (popd & echo  [错误] 构建失败 & pause & exit /b 1)
+    popd
+    echo        构建完成
+) else (
+    echo  [3/3] 前端已构建，跳过
+)
 echo.
 
 REM ── 启动后端服务（前台运行，单窗口）──
