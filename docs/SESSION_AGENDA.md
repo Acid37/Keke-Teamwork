@@ -29,17 +29,32 @@
 
 ## 下一步
 
-### 短期
+### 阶段 1：角色真正自定义（进行中）
 
-1. **前端时间线结构化** — 把 research/handoff 事件从系统消息升级为独立 timeline 视图。
-2. **事件持久化** — research/handoff 事件存入 session，刷新后不丢失。
-3. **基础模块测试** — `SessionStore`、`AppConfig`、`PermissionManager`、`FileStagingArea`、`EditTool`。
+- [x] 去掉 `_resolve_model` 角色硬编码，所有角色统一走 `agent_def.model → 角色回退 → main_model`。
+- [x] 前端 Agent 管理已支持 per-agent 模型选择（`formModel` 字段 + 模型下拉框）。
+- [x] Agent 分流从角色名判断改为工具权限判断（`_is_read_only_agent` / `_has_write_tools`）。
+- [ ] 全局配置里的 `coder_model`/`research_model`/`title_model` 降级为"默认回退值"文档说明。
+- [ ] 默认 Agent 定义从 3 个扩展到示例集（main/researcher/coder/reviewer/文档撰写师），展示自定义能力。
 
-### 中期
+### 阶段 2：工具可插拔（为非 coding 场景预留）
 
-4. **安全策略细分** — 命令风险分级、只读白名单、路径边界保护。
-5. **reviewer 审查流** — coder handoff 完成后自动触发 reviewer。
-6. **Checkpoint 历史回滚** — 接入已定义的 `Checkpoint` / `FileSnapshot`。
+- [ ] 工具注册改为分类注册（`coding`/`search`/`file`/`shell`/`mcp`），Agent 定义里按分类选工具。
+- [ ] 预留 MCP 工具接入接口。
+- [ ] `delegate_agent` 的只读/handoff 分流逻辑从硬编码工具列表改为按工具分类判断。
+
+### 阶段 3：GUI 参考 MoFox 优化
+
+- [ ] 首次启动 Setup Wizard（参考 MoFox 的 `SetupWizard.tsx`）。
+- [ ] 设置弹窗分区优化（模型/Agent/工具/安全 分 Tab，参考 MoFox 的 `SettingsModal`）。
+- [ ] 前端多 Agent 时间线结构化。
+
+### 阶段 4：安全分层
+
+- [ ] 命令风险分级（高危/只读/普通）。
+- [ ] 只读命令白名单（`git status`/`ls` 等直接放行）。
+- [ ] 路径边界保护（禁止访问 `work_dir` 外）。
+- [ ] per-agent 工具权限策略（参考 MoFox 的 `PermissionLevel`）。
 
 ## 暂不做
 
