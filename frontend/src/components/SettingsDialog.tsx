@@ -13,6 +13,7 @@ interface ConfigData {
   main_model: string;
   coder_model: string | null;
   research_model: string | null;
+  title_model: string | null;
   host: string;
   port: number;
 }
@@ -102,6 +103,7 @@ export function SettingsDialog({ open, onClose, appearance, onAppearanceChange }
       main_model: config.main_model,
       coder_model: config.coder_model || null,
       research_model: config.research_model || null,
+      title_model: config.title_model || null,
     };
 
     if (apiKeyInput && !apiKeyInput.includes('****')) {
@@ -302,6 +304,29 @@ export function SettingsDialog({ open, onClose, appearance, onAppearanceChange }
                     type="text"
                     value={config.research_model || ''}
                     onChange={(e) => setConfig({ ...config, research_model: e.target.value || null })}
+                    placeholder="同主模型"
+                  />
+                )}
+              </div>
+
+              {/* 标题模型 */}
+              <div className="settings-field">
+                <label>标题模型 <span className="optional">（可选，建议选轻量模型）</span></label>
+                {modelOptions.length > 0 ? (
+                  <select
+                    value={config.title_model || ''}
+                    onChange={(e) => setConfig({ ...config, title_model: e.target.value || null })}
+                  >
+                    <option value="">同主模型</option>
+                    {modelOptions.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={config.title_model || ''}
+                    onChange={(e) => setConfig({ ...config, title_model: e.target.value || null })}
                     placeholder="同主模型"
                   />
                 )}

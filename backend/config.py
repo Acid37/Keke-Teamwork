@@ -23,6 +23,7 @@ class AppConfig:
     main_model: str = "deepseek-chat"
     coder_model: str | None = None    # None = same as main
     research_model: str | None = None # None = same as main
+    title_model: str | None = None    # None = same as main
 
     # ─── Server ───
     host: str = "127.0.0.1"
@@ -59,6 +60,8 @@ class AppConfig:
             config.coder_model = v
         if v := os.getenv("CT_RESEARCH_MODEL"):
             config.research_model = v
+        if v := os.getenv("CT_TITLE_MODEL"):
+            config.title_model = v
         if v := os.getenv("CT_HOST"):
             config.host = v
         if v := os.getenv("CT_PORT"):
@@ -127,6 +130,10 @@ class AppConfig:
     @property
     def effective_research_model(self) -> str:
         return self.research_model or self.main_model
+
+    @property
+    def effective_title_model(self) -> str:
+        return self.title_model or self.main_model
 
 
 @dataclass

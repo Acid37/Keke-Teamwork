@@ -1018,22 +1018,33 @@ class AgentOrchestrator:
             logger.debug("LLM title generation failed, keeping fallback", exc_info=True)
 
     async def _call_llm_for_title(self, user_text: str) -> str:
-        """Call the main LLM to produce a concise session title.
+        """Call a lightweight LLM to produce a concise session title.
 
-        Reuses ``self._llm`` (the main model client). Uses a short system
-        prompt and low max_tokens to keep it cheap. Returns the raw title
+        Uses ``title_model`` if configured (can be a cheap/small model),
+        otherwise falls back to the main model. Returns the raw title
         string; caller handles cleanup and fallback.
         """
+        title_model = self._config.effective_title_model
+        if self._config.title_model:
+            llm = LLMClient(
+                provider=self._config.provider,
+                api_key=self._config.api_key,
+                base_url=self._config.base_url,
+                model=title_model,
+            )
+        else:
+            llm = self._llm
+
         system_prompt = (
             "你是一个会话标题生成器。根据用户的第一条消息，生成一个简洁的中文会话标题。"
             "要求：不超过 20 个字，不要引号，不要句号，概括用户意图。"
             "只返回标题文本，不要任何解释或前缀。"
         )
         title = ""
-        async for event in self._llm.chat(
+        async for event in llm.chat(
             messages=[{"role": "user", "content": user_text[:2000]}],
             system=system_prompt,
-            model=self._config.main_model,
+            model=title_model,
             max_tokens=64,
             temperature=0.3,
             stream=True,

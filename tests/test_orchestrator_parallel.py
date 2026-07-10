@@ -547,3 +547,42 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
         self.assertEqual(session.title, "修复左侧栏…")
         title_events = [e for e in broadcast.events if e[0] == "session.title.updated"]
         self.assertEqual(len(title_events), 0)
+
+    async def test_title_model_uses_dedicated_llm_client(self) -> None:
+        from unittest.mock import patch as _patch
+        from backend.types import StreamEvent
+
+        main = make_agent("main", role="assistant")
+        config = AppConfig(title_model="cheap-flash-model")
+        orchestrator = AgentOrchestrator(
+            config=config,
+            llm=object(),
+            agent_store=FakeStore([main]),
+            permission_managers={},
+        )
+        session = Session(id="dedicated-title-session", work_dir=Path("D:/proj"), title="Session 04:07")
+        broadcast = FakeBroadcast()
+
+        async def fake_chat(*, messages, system=None, model=None, max_tokens=64, temperature=0.3, stream=True, **kw):
+            self.assertEqual(model, "cheap-flash-model")
+            yield StreamEvent(text_delta="轻量标题")
+            yield StreamEvent(finish=True)
+
+        class FakeLLM:
+            def __init__(self, **kw):
+                self.created_with = kw
+
+            async def chat(self, **kwargs):
+                async for event in fake_chat(**kwargs):
+                    yield event
+
+        with _patch("backend.orchestrator.LLMClient", FakeLLM):
+            await orchestrator._update_title_with_llm(
+                session=session,
+                user_text="请帮我优化性能",
+                broadcast=broadcast,
+            )
+
+        self.assertEqual(session.title, "轻量标题")
+        title_events = [e for e in broadcast.events if e[0] == "session.title.updated"]
+        self.assertEqual(len(title_events), 1)

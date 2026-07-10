@@ -113,7 +113,7 @@ class WebSocketServer:
             """
             body = await request.json()
             updates = {}
-            for key in ("provider", "base_url", "main_model", "coder_model", "research_model"):
+            for key in ("provider", "base_url", "main_model", "coder_model", "research_model", "title_model"):
                 if key in body:
                     updates[key] = body[key] or None
             # API key: only update if user provided a new one (not masked)
