@@ -19,17 +19,17 @@ ALL_TOOLS = [
     DelegateTool,
 ]
 
-# Name → class mapping for resolving agent tool lists
+# 工具名 → 类映射，用于解析 Agent 工具列表
 TOOL_REGISTRY: dict[str, type[Tool]] = {cls.name: cls for cls in ALL_TOOLS}
 
-# Category → set of tool names, derived from class category attribute
+# 分类 → 工具名集合，从工具类的 category 属性派生
 CATEGORY_TOOLS: dict[ToolCategory, frozenset[str]] = {
     cat: frozenset(cls.name for cls in ALL_TOOLS if cls.category == cat)
     for cat in ToolCategory
 }
 
-# Tool names that have side effects (write to files or execute shell commands).
-# Agents with any of these tools are NOT read-only.
+# 有副作用的工具分类（写文件或执行 shell 命令）。
+# 拥有这些分类工具的 Agent 不是只读 Agent。
 WRITE_CATEGORIES: frozenset[ToolCategory] = frozenset({
     ToolCategory.file,
     ToolCategory.shell,
@@ -37,17 +37,17 @@ WRITE_CATEGORIES: frozenset[ToolCategory] = frozenset({
 
 
 def resolve_tools(names: list[str]) -> list[type[Tool]]:
-    """Resolve tool name strings to Tool classes, skipping unknown names."""
+    """将工具名字符串解析为 Tool 类，跳过未知的名称。"""
     return [TOOL_REGISTRY[n] for n in names if n in TOOL_REGISTRY]
 
 
 def tools_in_category(category: ToolCategory) -> frozenset[str]:
-    """Return all tool names belonging to a category."""
+    """返回属于指定分类的所有工具名。"""
     return CATEGORY_TOOLS.get(category, frozenset())
 
 
 def is_read_only_tool_set(tool_names: list[str]) -> bool:
-    """True if none of the given tool names belong to a write category."""
+    """判断工具集是否只读（不含任何写分类工具）。"""
     write_names = set()
     for cat in WRITE_CATEGORIES:
         write_names |= CATEGORY_TOOLS.get(cat, frozenset())
@@ -55,7 +55,7 @@ def is_read_only_tool_set(tool_names: list[str]) -> bool:
 
 
 def has_write_tool(tool_names: list[str]) -> bool:
-    """True if any of the given tool names belong to a write category."""
+    """判断工具集是否包含写工具（属于写分类的任意工具）。"""
     write_names = set()
     for cat in WRITE_CATEGORIES:
         write_names |= CATEGORY_TOOLS.get(cat, frozenset())

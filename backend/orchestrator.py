@@ -1,8 +1,7 @@
-"""Agent orchestration layer.
+"""Agent 编排层。
 
-Phase B starts here: keep the current single-Agent behavior intact, but move
-the execution workflow behind an orchestrator boundary so delegate/handoff and
-parallel researchers can be added without further bloating ws_server.py.
+编排入口：保持现有单 Agent 行为不变，但将执行流程移到 orchestrator 边界内，
+以便添加委派/handoff 和并行 researcher，而不再膨胀 ws_server.py。
 """
 
 from __future__ import annotations
@@ -29,11 +28,10 @@ Broadcast = Callable[[str, dict], Awaitable[None]]
 
 
 class AgentOrchestrator:
-    """Coordinates Agent execution for a session.
+    """协调会话中的 Agent 执行。
 
-    The first implementation intentionally preserves the existing single-Agent
-    path. The important change is ownership: WebSocketServer no longer needs to
-    know how to build agents, staging, permission managers, and callbacks.
+    首版实现有意保留现有单 Agent 路径。关键变化是职责归属：
+    WebSocketServer 不再需要知道如何构建 agent、staging、permission manager 和回调。
     """
 
     def __init__(
@@ -59,7 +57,7 @@ class AgentOrchestrator:
         agent_id: str = "main",
         broadcast: Broadcast,
     ) -> None:
-        """Process one user message through the orchestration layer."""
+        """通过编排层处理一条用户消息。"""
         session.phase = Phase.THINKING
         session.last_active_at = time.time()
 
@@ -561,7 +559,7 @@ class AgentOrchestrator:
         merged: MergedResearchResult,
         max_chars: int = 12_000,
     ) -> str:
-        """Format bounded read-only findings for the main Agent context."""
+        """格式化受限的只读发现结果，注入 main Agent 上下文。"""
         summary = (
             "[Parallel Research Summary]\n"
             "这些是只读 researcher 在主 Agent 执行前得到的参考结论；"
@@ -588,7 +586,7 @@ class AgentOrchestrator:
         staging: FileStagingArea,
         permission_mgr: PermissionManager,
     ) -> str:
-        """Run one serial child agent with the parent's write safety boundary."""
+        """运行一个串行子 Agent，复用父 Agent 的写入安全边界。"""
         agent_def = self._agent_store.get_agent(agent_id)
         if not agent_def:
             raise ValueError(f"Agent '{agent_id}' not found")
@@ -923,12 +921,12 @@ class AgentOrchestrator:
 
     @classmethod
     def _is_read_only_agent(cls, agent_def: AgentDefinition) -> bool:
-        """An agent is read-only if it has no write/shell tools."""
+        """Agent 没有写/shell 工具则为只读。"""
         return is_read_only_tool_set(agent_def.tools)
 
     @classmethod
     def _has_write_tools(cls, agent_def: AgentDefinition) -> bool:
-        """An agent has write capability if it owns any write/shell tool."""
+        """Agent 拥有任意写/shell 工具则有写能力。"""
         return has_write_tool(agent_def.tools)
 
     def _should_run_parallel_research(
@@ -949,12 +947,11 @@ class AgentOrchestrator:
         )
 
     def _resolve_model(self, agent_def: AgentDefinition) -> str:
-        """Resolve the effective model for an agent.
+        """解析 Agent 的有效模型。
 
-        Priority: agent_def.model → global role-based fallback → main_model.
-        Role-based fallbacks (research_model, coder_model) are convenience
-        defaults only — any custom role with its own model field takes
-        precedence.
+        优先级：agent_def.model → 全局角色回退值 → main_model。
+        角色回退值（research_model, coder_model）仅为便利默认值——
+        任何自定义角色有自己的 model 字段时优先使用。
         """
         if agent_def.model:
             return agent_def.model
@@ -991,7 +988,7 @@ class AgentOrchestrator:
 
     @staticmethod
     def _should_generate_title(session: Session) -> bool:
-        """Only replace placeholder titles, never project/user-provided names."""
+        """只替换占位标题，不替换项目/用户提供的名称。"""
         import re
 
         title = (session.title or "").strip()
@@ -999,7 +996,7 @@ class AgentOrchestrator:
 
     @staticmethod
     def _generate_session_title(text: str, work_dir) -> str:
-        """Create a short deterministic title from the first user message.
+        """从第一条用户消息生成简短的确定性标题。
 
         This is the instant fallback used before the async LLM title update
         completes (or when the LLM call fails).
@@ -1022,7 +1019,7 @@ class AgentOrchestrator:
         user_text: str,
         broadcast: Broadcast,
     ) -> None:
-        """Asynchronously generate a semantic session title via LLM.
+        """异步通过 LLM 生成语义会话标题。
 
         Uses the main LLM client (no dedicated title model). Falls back to
         the algorithmic title on any error. Broadcasts ``session.title.updated``
@@ -1046,7 +1043,7 @@ class AgentOrchestrator:
             logger.debug("LLM title generation failed, keeping fallback", exc_info=True)
 
     async def _call_llm_for_title(self, user_text: str) -> str:
-        """Call a lightweight LLM to produce a concise session title.
+        """调用轻量 LLM 生成简洁的会话标题。
 
         Uses ``title_model`` if configured (can be a cheap/small model),
         otherwise falls back to the main model. Returns the raw title
@@ -1085,64 +1082,62 @@ class AgentOrchestrator:
 
     @staticmethod
     def _build_system_prompt(session: Session) -> str:
-        """Build the default system prompt for the main agent."""
-        return f"""You are a helpful coding assistant. You help users with software development tasks.
+        """构建 main Agent 的默认系统提示词。"""
+        return f"""你是一个乐于助人的编程助手，帮助用户完成软件开发任务。
 
-You have access to the following tools:
-- read_file: Read file contents with line numbers
-- write_file: Create or overwrite a file
-- edit_file: Search and replace text in a file
-- run_console: Execute shell commands
-- grep_search: Search file contents with regex
-- find_files: Find files by name pattern
-- list_directory: List directory contents in tree format
+你可以使用以下工具：
+- read_file: 读取文件内容（带行号）
+- write_file: 创建或覆盖文件
+- edit_file: 在文件中搜索并替换文本
+- run_console: 执行 shell 命令
+- grep_search: 使用正则搜索文件内容
+- find_files: 按名称模式查找文件
+- list_directory: 以树形结构列出目录内容
 
-Working directory: {session.work_dir}
+工作目录：{session.work_dir}
 
-Guidelines:
-- Read files before modifying them to understand context
-- Use edit_file for small changes (preserves surrounding code)
-- Use write_file only for new files or complete rewrites
-- Run tests after making changes when possible
-- Explain your reasoning before making changes
-- If unsure about the project structure, use list_directory and grep_search first
+行为准则：
+- 修改文件前先读取，了解上下文
+- 小改动使用 edit_file（保留周围代码）
+- 仅在创建新文件或完全重写时使用 write_file
+- 修改后尽可能运行测试验证
+- 修改前先解释你的思路
+- 不确定项目结构时，先用 list_directory 和 grep_search 探索
 """
 
     @staticmethod
     def _build_delegated_system_prompt(session: Session, agent_def: AgentDefinition) -> str:
-        """Build the default prompt for read-only delegated agents."""
-        return f"""You are {agent_def.name}, a read-only delegated coding assistant.
+        """构建只读委派 Agent 的默认提示词。"""
+        return f"""你是 {agent_def.name}，一个只读的委派编程助手。
 
-Your job is to investigate focused subtasks for another agent. You may inspect
-the local project using read/search/list tools, but you must not modify files,
-run shell commands, or perform broad unrelated work.
+你的职责是为其他 Agent 调研聚焦的子任务。你可以使用读/搜索/列表工具检查本地项目，
+但不能修改文件、执行 shell 命令，或做与任务无关的广泛操作。
 
-Working directory: {session.work_dir}
+工作目录：{session.work_dir}
 
-Guidelines:
-- Stay focused on the delegated task.
-- Cite relevant files and symbols when possible.
-- Prefer concise findings over long explanations.
-- Explicitly mention uncertainty or missing information.
-- Do not attempt to edit files or execute commands.
+行为准则：
+- 严格聚焦在委派任务上。
+- 尽可能引用相关文件和符号。
+- 偏好简洁的发现而非冗长的解释。
+- 明确说明不确定性和缺失信息。
+- 不要尝试编辑文件或执行命令。
 """
 
     @staticmethod
     def _build_handoff_system_prompt(session: Session, agent_def: AgentDefinition) -> str:
-        """Build the default prompt for serial handoff agents."""
-        return f"""You are {agent_def.name}, a delegated {agent_def.role} agent.
+        """构建串行 handoff Agent 的默认提示词。"""
+        return f"""你是 {agent_def.name}，一个委派的 {agent_def.role} Agent。
 
-Your job is to complete one focused handoff task for the parent agent. You may
-use the tools assigned to your role, but all file changes must go through the
-provided tool/staging boundary, and shell commands must follow the configured
-permission rules. Do not delegate work to other agents.
+你的职责是为父 Agent 完成一个聚焦的 handoff 任务。
+你可以使用角色分配的工具，但所有文件变更必须通过工具/staging 边界，
+shell 命令必须遵守配置的审批规则。不要将工作委派给其他 Agent。
 
-Working directory: {session.work_dir}
+工作目录：{session.work_dir}
 
-Guidelines:
-- Stay strictly within the delegated task and given context.
-- Prefer small, reviewable file changes.
-- Read relevant files before editing them.
-- Run focused verification commands only when useful.
-- Summarize what changed, what you verified, and any remaining risk.
+行为准则：
+- 严格在委派任务和给定上下文中工作。
+- 偏好小的、可审查的文件变更。
+- 编辑前先读取相关文件。
+- 仅在有用时运行聚焦的验证命令。
+- 总结所做的变更、验证的内容以及任何残留风险。
 """

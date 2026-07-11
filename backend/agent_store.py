@@ -1,4 +1,4 @@
-"""Agent definition store — CRUD for agents.json."""
+"""Agent 定义存储——agents.json 的 CRUD 操作。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from backend.types import AgentDefinition
 
 logger = logging.getLogger(__name__)
 
-# ─── Default agents (written on first run) ───
+# ─── 默认 Agent（首次运行时写入） ───
 
 _DEFAULT_AGENTS: list[dict] = [
     {
@@ -89,7 +89,7 @@ _DEFAULT_AGENTS: list[dict] = [
 
 
 class AgentStore:
-    """Manages agent definitions persisted in agents.json."""
+    """管理持久化在 agents.json 中的 Agent 定义。"""
 
     def __init__(self, data_dir: Path):
         self._data_dir = data_dir
@@ -97,7 +97,7 @@ class AgentStore:
         self._agents: dict[str, AgentDefinition] = {}
         self._load()
 
-    # ─── Public API ───
+    # ─── 公开接口 ───
 
     def list_agents(self) -> list[AgentDefinition]:
         return list(self._agents.values())
@@ -114,13 +114,13 @@ class AgentStore:
         if agent_id not in self._agents:
             return False
         if agent_id == "main":
-            raise ValueError("Cannot delete the default 'main' agent")
+            raise ValueError("不能删除默认的 'main' Agent")
         del self._agents[agent_id]
         self._persist()
-        logger.info("Agent deleted: %s", agent_id)
+        logger.info("Agent 已删除: %s", agent_id)
         return True
 
-    # ─── Internal ───
+    # ─── 内部方法 ───
 
     def _load(self) -> None:
         if self._file.exists():
@@ -131,7 +131,7 @@ class AgentStore:
                     self._agents[agent.agent_id] = agent
                 logger.info("Loaded %d agents from %s", len(self._agents), self._file)
             except Exception:
-                logger.warning("Failed to load agents.json, using defaults", exc_info=True)
+                logger.warning("加载 agents.json 失败，使用默认值", exc_info=True)
                 self._write_defaults()
         else:
             self._write_defaults()
@@ -144,7 +144,7 @@ class AgentStore:
         logger.info("Created default agents.json with %d agents", len(self._agents))
 
     def _persist(self) -> None:
-        """Atomic write: temp file + os.replace."""
+        """原子写入：临时文件 + os.replace。"""
         self._data_dir.mkdir(parents=True, exist_ok=True)
         data = [a.to_dict() for a in self._agents.values()]
         tmp_fd, tmp_path = tempfile.mkstemp(

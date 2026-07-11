@@ -1,4 +1,4 @@
-"""LLM provider implementations for OpenAI-compatible, Anthropic, and Gemini APIs."""
+"""LLM provider 实现：支持 OpenAI 兼容接口、Anthropic 和 Gemini API。"""
 
 import json
 import logging
@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class OpenAICompatProvider:
-    """Provider for OpenAI-compatible APIs (including DeepSeek, etc.)."""
+    """OpenAI 兼容 API 的 provider（包括 DeepSeek 等）。"""
 
     def __init__(self, api_key: str, base_url: str):
         from openai import AsyncOpenAI
@@ -20,7 +20,7 @@ class OpenAICompatProvider:
 
     @staticmethod
     def _prepare_messages(messages: list[dict], system: str | None) -> list[dict]:
-        """Prepend a system message if provided."""
+        """如果有 system 消息则插入到开头。"""
         if system:
             return [{"role": "system", "content": system}, *messages]
         return list(messages)

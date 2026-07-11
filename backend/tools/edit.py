@@ -1,20 +1,21 @@
 from pathlib import Path
 from backend.types import ToolResult
 from backend.tools.base import Tool, ToolCategory
+from backend.safety.path_guard import resolve_path, PathBoundaryError
 
 
 class EditTool(Tool):
-    """Search and replace text in files."""
+    """在文件中搜索并替换文本。"""
 
     name = "edit_file"
     category = ToolCategory.file
-    description = "Replace text in a file. The old_text must match exactly (including whitespace)."
+    description = "替换文件中的文本。old_text 必须与文件内容完全匹配（包括空白字符）。"
     parameters = {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File path to edit (relative to work_dir or absolute)"},
-            "old_text": {"type": "string", "description": "Text to find (must match exactly)"},
-            "new_text": {"type": "string", "description": "Text to replace with"},
+            "path": {"type": "string", "description": "文件路径（相对于 work_dir 或绝对路径）"},
+            "old_text": {"type": "string", "description": "要查找的文本（必须完全匹配）"},
+            "new_text": {"type": "string", "description": "替换后的文本"},
         },
         "required": ["path", "old_text", "new_text"],
     }
@@ -25,16 +26,17 @@ class EditTool(Tool):
             old_text = kwargs["old_text"]
             new_text = kwargs["new_text"]
 
-            # Resolve path relative to work_dir
-            file_path = Path(path_str)
-            if not file_path.is_absolute():
-                file_path = self._ctx.work_dir / file_path
+            # Resolve path relative to work_dir, with boundary protection
+            try:
+                file_path = resolve_path(path_str, self._ctx.work_dir)
+            except PathBoundaryError as e:
+                return (False, str(e))
 
             # Check file exists
             if not file_path.exists():
-                return (False, f"File not found: {file_path}")
+                return (False, f"文件未找到: {file_path}")
             if not file_path.is_file():
-                return (False, f"Not a file: {file_path}")
+                return (False, f"不是一个文件: {file_path}")
 
             # Read current content
             try:
@@ -45,7 +47,7 @@ class EditTool(Tool):
                     with open(file_path, "r", encoding="latin-1") as f:
                         content = f.read()
                 except Exception as e:
-                    return (False, f"Error reading file: {e}")
+                    return (False, f"读取文件错误: {e}")
 
             # Count occurrences
             count = content.count(old_text)
@@ -57,9 +59,9 @@ class EditTool(Tool):
                 count = content_normalized.count(old_text_normalized)
 
                 if count == 0:
-                    return (False, "Text not found in file. Make sure the text matches exactly.")
+                    return (False, "未在文件中找到该文本。请确保文本与文件内容完全匹配。")
                 elif count > 1:
-                    return (False, f"Text matches {count} locations. Provide more context for a unique match.")
+                    return (False, f"文本匹配到 {count} 处。请提供更多上下文以确保唯一定位。")
 
                 # Perform replacement on normalized content
                 new_content_normalized = content_normalized.replace(old_text_normalized, new_text, 1)
@@ -71,7 +73,7 @@ class EditTool(Tool):
                     new_content = new_content_normalized
             else:
                 if count > 1:
-                    return (False, f"Text matches {count} locations. Provide more context for a unique match.")
+                    return (False, f"文本匹配到 {count} 处。请提供更多上下文以确保唯一定位。")
 
                 # Perform replacement
                 new_content = content.replace(old_text, new_text, 1)
@@ -86,4 +88,4 @@ class EditTool(Tool):
             return (True, f"Edited: {path_str} (1 replacement)")
 
         except Exception as e:
-            return (False, f"Error: {e}")
+            return (False, f"错误: {e}")

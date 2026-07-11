@@ -1,4 +1,4 @@
-"""Shared data types for all modules."""
+"""所有模块共享的数据类型。"""
 
 from __future__ import annotations
 
@@ -10,27 +10,27 @@ from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
 
-# ─── LLM related ───
+# ─── LLM 相关 ───
 
 @dataclass
 class ToolSchema:
-    """Tool JSON Schema description, passed directly to OpenAI SDK."""
+    """工具的 JSON Schema 描述，直接传递给 OpenAI SDK。"""
     name: str
     description: str
-    parameters: dict  # JSON Schema object
+    parameters: dict  # JSON Schema 对象
 
 
 @dataclass
 class ToolCall:
-    """A tool call returned by the LLM."""
+    """LLM 返回的工具调用。"""
     id: str
     name: str
-    args: dict  # Parsed argument dict
+    args: dict  # 解析后的参数字典
 
 
 @dataclass
 class StreamEvent:
-    """One streaming event yielded per chunk."""
+    """每个流式块产生的事件。"""
     text_delta: str | None = None
     thinking_delta: str | None = None
     tool_calls: list[ToolCall] | None = None
@@ -48,18 +48,18 @@ class TokenUsage:
         return self
 
 
-# ─── Tool execution ───
+# ─── 工具执行 ───
 
-ToolResult = tuple[bool, str]  # (success, output_text)
+ToolResult = tuple[bool, str]  # (是否成功, 输出文本)
 
 
-# ─── File changes ───
+# ─── 文件变更 ───
 
 @dataclass
 class FileDiff:
     path: Path
     action: str          # "create" | "modify" | "delete"
-    diff_text: str       # unified diff format
+    diff_text: str       # unified diff 格式
     new_content: str | None = None
 
 
@@ -71,7 +71,7 @@ class CommitResult:
     summary: str
 
 
-# ─── Checkpoints ───
+# ─── 检查点 ───
 
 @dataclass
 class FileSnapshot:
@@ -97,7 +97,7 @@ class Checkpoint:
             self.id = uuid4().hex[:8]
 
 
-# ─── Session ───
+# ─── 会话 ───
 
 class Phase(str, Enum):
     INIT = "init"
@@ -134,36 +134,36 @@ class Session:
             self.last_active_at = now
 
 
-# ─── Tool context ───
+# ─── 工具上下文 ───
 
 @dataclass
 class ToolContext:
-    """Execution context injected into every tool.
+    """注入到每个工具的执行上下文。
 
-    Tools access external state (session, staging, etc.) through this
-    object so they remain stateless and testable.
+    工具通过此对象访问外部状态（会话、暂存区等），
+    使工具本身保持无状态且可测试。
     """
     session: Session
     work_dir: Path
-    staging: Any = None  # FileStagingArea | None (avoid circular import)
+    staging: Any = None  # FileStagingArea | None（避免循环导入）
     checkpoint_mgr: Any = None  # CheckpointManager | None
     permission_mgr: Any = None  # PermissionManager | None
-    delegate_runner: Any = None  # Callable for delegate_agent tool (avoid circular import)
+    delegate_runner: Any = None  # delegate_agent 工具的回调（避免循环导入）
     broadcast: Callable[..., Awaitable[None]] | None = None
     interrupt_check: Callable[[], bool] | None = None
 
 
-# ─── Agent definition ───
+# ─── Agent 定义 ───
 
 @dataclass
 class AgentDefinition:
-    """A customizable agent role definition stored in agents.json."""
+    """可自定义的 Agent 角色定义，存储在 agents.json 中。"""
     agent_id: str
-    name: str                        # display name, e.g. "方案规划师"
-    role: str                        # role tag, e.g. "planner", "coder"
+    name: str                        # 显示名称，如 "方案规划师"
+    role: str                        # 角色标签，如 "planner"、"coder"
     system_prompt: str = ""
-    provider: str | None = None      # override global provider
-    model: str | None = None         # override global main_model
+    provider: str | None = None      # 覆盖全局 provider
+    model: str | None = None         # 覆盖全局 main_model
     temperature: float = 0.7
     tools: list[str] = field(default_factory=lambda: [
         "read_file", "write_file", "edit_file",
@@ -171,7 +171,7 @@ class AgentDefinition:
         "delegate_agent",
     ])
     max_tool_rounds: int = 50
-    color: str = "#4a9eff"           # frontend display color
+    color: str = "#4a9eff"           # 前端显示颜色
     description: str = ""
 
     def to_dict(self) -> dict:
@@ -196,7 +196,7 @@ class AgentDefinition:
         return cls(**filtered)
 
 
-# ─── Agent result ───
+# ─── Agent 结果 ───
 
 @dataclass
 class AgentResult:

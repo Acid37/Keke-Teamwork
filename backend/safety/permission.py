@@ -1,4 +1,4 @@
-"""Command approval manager for console tool execution."""
+"""命令审批管理器，用于 console 工具执行前的审批。"""
 
 from __future__ import annotations
 
@@ -6,9 +6,17 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from uuid import uuid4
 
+from backend.safety.command_risk import CommandRisk, classify_command
+
 
 class PermissionManager:
-    """Requests user approval for shell commands over WebSocket."""
+    """通过 WebSocket 请求用户审批 shell 命令。
+
+    风险分级：
+    - read_only: 自动放行（无需用户确认）
+    - normal:    标准审批流程（YOLO 模式跳过，否则需确认）
+    - dangerous: 始终需要明确审批，即使 YOLO 模式
+    """
 
     def __init__(
         self,
@@ -23,30 +31,53 @@ class PermissionManager:
         self._pending: dict[str, asyncio.Future[bool]] = {}
 
     def check(self, command: str) -> str:
-        """Return allow / deny / needs_approval for a command."""
+        """返回 allow / deny / needs_approval。
+
+        使用命令风险分级：
+        - read_only 命令始终放行
+        - dangerous 命令始终需审批（即使 YOLO）
+        - normal 命令遵循 YOLO 模式
+        """
         if not command.strip():
             return "deny"
+
+        risk = classify_command(command)
+
+        if risk == CommandRisk.read_only:
+            return "allow"
+
+        if risk == CommandRisk.dangerous:
+            # 高危命令始终需要明确审批
+            return "needs_approval"
+
+        # 普通命令
         if self._yolo_mode:
             return "allow"
         return "needs_approval"
 
     def set_yolo_mode(self, enabled: bool) -> None:
-        """Update approval behavior for an active session."""
+        """更新活动会话的审批行为。"""
         self._yolo_mode = enabled
 
     async def request_approval(self, command: str) -> bool:
-        """Ask the frontend for approval and wait for the response."""
+        """请求前端审批并等待响应。"""
         if self._yolo_mode:
-            return True
+            # YOLO 模式：只有 read_only 命令能通过 check() 到这里
+            # 高危命令即使在 YOLO 模式下也需要审批
+            risk = classify_command(command)
+            if risk != CommandRisk.dangerous:
+                return True
 
         request_id = uuid4().hex[:12]
         loop = asyncio.get_running_loop()
         future: asyncio.Future[bool] = loop.create_future()
         self._pending[request_id] = future
 
+        risk = classify_command(command)
         await self._broadcast("approval.request", {
             "request_id": request_id,
             "command": command,
+            "risk_level": risk.value,
             "timeout_seconds": self._timeout_seconds,
         })
 
@@ -58,7 +89,7 @@ class PermissionManager:
             self._pending.pop(request_id, None)
 
     def resolve(self, request_id: str, approved: bool) -> bool:
-        """Resolve a pending approval request. Returns False if unknown."""
+        """处理待审批请求。未知请求返回 False。"""
         future = self._pending.get(request_id)
         if not future or future.done():
             return False

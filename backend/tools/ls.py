@@ -1,19 +1,20 @@
 from pathlib import Path
 from backend.types import ToolResult
 from backend.tools.base import Tool, ToolCategory
+from backend.safety.path_guard import resolve_path, PathBoundaryError
 
 
 class LsTool(Tool):
-    """List directory contents in tree format."""
+    """以树形结构列出目录内容。"""
 
     name = "list_directory"
     category = ToolCategory.search
-    description = "List directory contents in a tree format with configurable depth."
+    description = "以树形结构列出目录内容，可配置显示深度。"
     parameters = {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Directory path to list (default: work_dir)"},
-            "depth": {"type": "integer", "description": "Depth of directory tree to display (default: 2)", "default": 2},
+            "path": {"type": "string", "description": "目录路径（默认：work_dir）"},
+            "depth": {"type": "integer", "description": "目录树显示深度（默认：2）", "default": 2},
         },
         "required": [],
     }
@@ -23,18 +24,19 @@ class LsTool(Tool):
             path_str = kwargs.get("path")
             depth = kwargs.get("depth", 2)
 
-            # Resolve path
+            # Resolve path with boundary protection
             if path_str:
-                target_path = Path(path_str)
-                if not target_path.is_absolute():
-                    target_path = self._ctx.work_dir / target_path
+                try:
+                    target_path = resolve_path(path_str, self._ctx.work_dir)
+                except PathBoundaryError as e:
+                    return (False, str(e))
             else:
-                target_path = self._ctx.work_dir
+                target_path = self._ctx.work_dir.resolve()
 
             if not target_path.exists():
-                return (False, f"Path not found: {target_path}")
+                return (False, f"路径未找到: {target_path}")
             if not target_path.is_dir():
-                return (False, f"Not a directory: {target_path}")
+                return (False, f"不是一个目录: {target_path}")
 
             # Directories to skip
             skip_dirs = {".git", "node_modules", "__pycache__", "venv", ".venv", "dist", "build", ".next", ".cache", ".idea"}
@@ -73,10 +75,10 @@ class LsTool(Tool):
                 tree_lines.append(target_path.name + "/")
                 build_tree(target_path, 1, depth)
             except Exception as e:
-                return (False, f"Error listing directory: {e}")
+                return (False, f"列出目录错误: {e}")
 
             tree_string = "\n".join(tree_lines)
             return (True, tree_string)
 
         except Exception as e:
-            return (False, f"Error: {e}")
+            return (False, f"错误: {e}")

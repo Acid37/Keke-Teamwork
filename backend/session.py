@@ -1,4 +1,4 @@
-"""Session persistence — JSON file storage with atomic writes."""
+"""会话持久化——JSON 文件存储，原子写入。"""
 
 from __future__ import annotations
 
@@ -14,10 +14,10 @@ logger = logging.getLogger(__name__)
 
 
 class SessionStore:
-    """JSON file session persistence.
+    """JSON 文件会话持久化。
 
-    Storage path: {data_dir}/sessions/{session_id}.json
-    Atomic write: write to temp file then os.replace().
+    存储路径：{data_dir}/sessions/{session_id}.json
+    原子写入：先写临时文件再 os.replace()。
     """
 
     def __init__(self, data_dir: Path):
@@ -25,7 +25,7 @@ class SessionStore:
         self._sessions_dir.mkdir(parents=True, exist_ok=True)
 
     def save(self, session: Session) -> None:
-        """Save session state to JSON file."""
+        """保存会话状态到 JSON 文件。"""
         path = self._sessions_dir / f"{session.id}.json"
         data = self._serialize(session)
         self._atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2))

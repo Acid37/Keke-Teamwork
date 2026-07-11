@@ -1,20 +1,21 @@
 from pathlib import Path
 from backend.types import ToolResult
 from backend.tools.base import Tool, ToolCategory
+from backend.safety.path_guard import resolve_path, PathBoundaryError
 
 
 class ReadTool(Tool):
-    """Read file contents with line numbers."""
+    """读取文件内容，带行号显示。"""
 
     name = "read_file"
     category = ToolCategory.search
-    description = "Read the contents of a file. Supports line range selection and handles large files intelligently."
+    description = "读取文件内容。支持行范围选择，智能处理大文件。"
     parameters = {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File path to read (relative to work_dir or absolute)"},
-            "start_line": {"type": "integer", "description": "Start line number (1-based, optional)"},
-            "end_line": {"type": "integer", "description": "End line number (1-based, optional)"},
+            "path": {"type": "string", "description": "文件路径（相对于 work_dir 或绝对路径）"},
+            "start_line": {"type": "integer", "description": "起始行号（从 1 开始，可选）"},
+            "end_line": {"type": "integer", "description": "结束行号（从 1 开始，可选）"},
         },
         "required": ["path"],
     }
@@ -25,25 +26,26 @@ class ReadTool(Tool):
             start_line = kwargs.get("start_line")
             end_line = kwargs.get("end_line")
 
-            # Resolve path relative to work_dir
-            file_path = Path(path_str)
-            if not file_path.is_absolute():
-                file_path = self._ctx.work_dir / file_path
+            # Resolve path relative to work_dir, with boundary protection
+            try:
+                file_path = resolve_path(path_str, self._ctx.work_dir)
+            except PathBoundaryError as e:
+                return (False, str(e))
 
             # Check file exists
             if not file_path.exists():
-                return (False, f"File not found: {file_path}")
+                return (False, f"文件未找到: {file_path}")
             if not file_path.is_file():
-                return (False, f"Not a file: {file_path}")
+                return (False, f"不是一个文件: {file_path}")
 
             # Detect binary files
             try:
                 with open(file_path, "rb") as f:
                     chunk = f.read(8192)
                     if b"\x00" in chunk:
-                        return (False, f"Binary file detected: {file_path}")
+                        return (False, f"检测到二进制文件: {file_path}")
             except Exception as e:
-                return (False, f"Error reading file: {e}")
+                return (False, f"读取文件错误: {e}")
 
             # Read with utf-8 encoding, fallback to latin-1
             try:
@@ -54,7 +56,7 @@ class ReadTool(Tool):
                     with open(file_path, "r", encoding="latin-1") as f:
                         lines = f.readlines()
                 except Exception as e:
-                    return (False, f"Error reading file: {e}")
+                    return (False, f"读取文件错误: {e}")
 
             total_lines = len(lines)
 
@@ -100,4 +102,4 @@ class ReadTool(Tool):
             return (True, content)
 
         except Exception as e:
-            return (False, f"Error: {e}")
+            return (False, f"错误: {e}")

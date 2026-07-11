@@ -62,7 +62,7 @@ class DelegateAgentTests(IsolatedAsyncioTestCase):
         success, result = await tool.execute(agent_id="researcher", task="inspect")
 
         self.assertFalse(success)
-        self.assertIn("Delegation is not available", result)
+        self.assertIn("当前上下文不支持委派", result)
 
     async def test_orchestrator_delegated_agent_is_read_only(self) -> None:
         with TemporaryDirectory() as tmp:

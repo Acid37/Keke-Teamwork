@@ -1,4 +1,4 @@
-"""Application configuration."""
+"""应用配置。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AppConfig:
-    """Application config. Loaded from JSON file, with env var overrides."""
+    """应用配置。从 JSON 文件加载，环境变量可覆盖。"""
 
     # ─── LLM ───
     provider: str = "openai"          # "openai" | "anthropic" | "gemini"
@@ -29,18 +29,18 @@ class AppConfig:
     research_model: str | None = None # researcher 角色未指定 model 时的回退值
     title_model: str | None = None    # 标题生成未指定 model 时的回退值
 
-    # ─── Server ───
+    # ─── 服务器 ───
     host: str = "127.0.0.1"
     port: int = 8765
 
-    # ─── Console ───
-    console_timeout: int = 30         # seconds
-    console_max_output: int = 200     # max output lines
+    # ─── 命令执行 ───
+    console_timeout: int = 30         # 超时秒数
+    console_max_output: int = 200     # 最大输出行数
 
-    # ─── Research ───
+    # ─── 研究 ───
     max_parallel_researchers: int = 6
 
-    # ─── Paths ───
+    # ─── 路径 ───
     data_dir: Path = field(default_factory=lambda: Path.home() / ".keke-teamwork")
 
     @property
@@ -49,9 +49,9 @@ class AppConfig:
 
     @classmethod
     def load(cls) -> AppConfig:
-        """Load config: JSON file first, then env var overrides on top."""
+        """加载配置：先读 JSON 文件，再用环境变量覆盖。"""
         config = cls._load_from_file()
-        # Env vars override file values
+        # 环境变量覆盖文件值
         if v := os.getenv("CT_PROVIDER"):
             config.provider = v
         if v := os.getenv("CT_API_KEY"):
@@ -76,32 +76,32 @@ class AppConfig:
 
     @classmethod
     def from_env(cls) -> AppConfig:
-        """Alias for load() — loads file + env overrides."""
+        """load() 的别名——加载文件 + 环境变量覆盖。"""
         return cls.load()
 
     @classmethod
     def _load_from_file(cls) -> AppConfig:
-        """Load from JSON config file. Returns defaults if file doesn't exist."""
+        """从 JSON 配置文件加载。文件不存在时返回默认值。"""
         default_dir = Path.home() / ".keke-teamwork"
         config_path = default_dir / "config.json"
         if not config_path.exists():
             return cls()
         try:
             data = json.loads(config_path.read_text(encoding="utf-8"))
-            # Filter to only known fields
+            # 只保留已知字段
             known = {f.name for f in cls.__dataclass_fields__.values()}
             filtered = {k: v for k, v in data.items() if k in known and k != "data_dir"}
             return cls(**filtered)
         except (json.JSONDecodeError, TypeError, KeyError) as e:
             import logging
-            logging.getLogger(__name__).warning("Failed to load config file: %s", e)
+            logging.getLogger(__name__).warning("加载配置文件失败: %s", e)
             return cls()
 
     def save(self) -> None:
-        """Persist current config to JSON file."""
+        """将当前配置持久化到 JSON 文件。"""
         self.data_dir.mkdir(parents=True, exist_ok=True)
         data = asdict(self)
-        # Don't persist data_dir (it's derived from home)
+        # 不持久化 data_dir（从 home 目录派生）
         data.pop("data_dir", None)
         self.config_file.write_text(
             json.dumps(data, ensure_ascii=False, indent=2),
@@ -109,17 +109,17 @@ class AppConfig:
         )
 
     def update(self, **kwargs) -> None:
-        """Update config fields and save to file."""
+        """更新配置字段并保存到文件。"""
         for key, value in kwargs.items():
             if hasattr(self, key):
                 setattr(self, key, value)
         self.save()
 
     def to_dict(self) -> dict:
-        """Serialize to dict (for API response). Hides full api_key."""
+        """序列化为字典（用于 API 响应）。隐藏完整 api_key。"""
         data = asdict(self)
         data.pop("data_dir", None)
-        # Mask API key: show first 4 + last 4 chars
+        # 脱敏 API key：只显示前 4 + 后 4 字符
         key = data.get("api_key", "")
         if len(key) > 8:
             data["api_key_masked"] = key[:4] + "****" + key[-4:]

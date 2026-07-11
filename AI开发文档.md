@@ -119,8 +119,36 @@ agent_def.model（per-agent 指定）
 | `AgentStore` | Agent 定义 CRUD，持久化到 `agents.json` |
 | `SessionStore` | 会话持久化，存储在 `~/.keke-teamwork/sessions/` |
 | `FileStagingArea` | 文件写入前记录 baseline，成功后生成 diff，异常时 rollback |
-| `PermissionManager` | 非 YOLO 模式下命令审批（WebSocket 请求用户确认） |
+| `PermissionManager` | 命令审批，集成风险分级（只读自动放行、高危强制审批） |
+| `CommandRisk` | 命令风险分类（read_only / normal / dangerous） |
+| `PathGuard` | 路径边界保护，禁止工具访问 `work_dir` 外路径 |
 | `LLMClient` | 统一 LLM 接口，支持 OpenAI / Anthropic / Gemini |
+
+### 安全分层
+
+#### 命令风险分级
+
+`backend/safety/command_risk.py` 将 shell 命令分为三级：
+
+| 级别 | 含义 | 审批行为 |
+|---|---|---|
+| `read_only` | 只读命令（`ls`、`git status`、`cat` 等） | 自动放行，无需审批 |
+| `normal` | 普通命令（`git add`、`npm install` 等） | 非 YOLO 模式需审批，YOOLO 模式放行 |
+| `dangerous` | 高危命令（`rm -rf`、`git push --force`、`shutdown` 等） | 始终需要审批，即使 YOLO 模式 |
+
+`PermissionManager.check()` 根据风险级别决定审批流程：
+- `read_only` → `"allow"`
+- `dangerous` → `"needs_approval"`（即使 YOLO）
+- `normal` → YOLO 模式 `"allow"`，否则 `"needs_approval"`
+
+#### 路径边界保护
+
+`backend/safety/path_guard.py` 确保所有 file/search 类工具只能访问 `work_dir` 内的路径：
+
+- `resolve_path(path_str, work_dir)` — 解析路径并检查边界，越界抛出 `PathBoundaryError`
+- 相对路径自动拼接 `work_dir`，绝对路径直接检查
+- `..` 逃逸、绝对路径越界、符号链接指向外部均被拦截
+- 已接入 `read_file`、`write_file`、`edit_file`、`grep_search`、`find_files`、`list_directory`
 
 ## 默认 Agent 定义
 
@@ -163,11 +191,13 @@ agent_def.model（per-agent 指定）
 python -m unittest -v
 ```
 
-当前 40 个测试通过，覆盖：
+当前 87 个测试通过，覆盖：
 - 委派工具与 handoff 安全边界
 - 并行 researcher 调度与合并
 - LLM 标题生成与 fallback
 - 工具分类注册与分流判断
+- 命令风险分级（只读/普通/高危）
+- 路径边界保护（工具集成测试）
 - 主流程守卫
 
 ### 前端构建
@@ -223,8 +253,8 @@ cd frontend && npm run build
 - research/handoff 事件不持久化，刷新后丢失
 - reviewer 审查流尚未落地
 - `Checkpoint` / `FileSnapshot` 类型已定义，未形成完整回滚历史系统
-- 命令审批是粗粒度策略，尚未做高危命令识别和只读命令白名单
-- 基础模块（SessionStore、PermissionManager、FileStagingArea、EditTool）缺少独立测试
+- per-agent 工具权限策略尚未落地
+- 基础模块（SessionStore、FileStagingArea、EditTool）缺少独立测试
 
 ## 开发路线
 
@@ -234,6 +264,6 @@ cd frontend && npm run build
 
 1. MCP 工具接入
 2. 前端多 Agent 时间线结构化展示
-3. 安全策略分层（命令风险分级、只读白名单、路径边界）
+3. per-agent 工具权限策略
 4. 基础模块测试补全
 5. reviewer 审查流（research → plan → code → review 闭环）

@@ -1,8 +1,8 @@
-"""Agent runtime — the core Tool Calling loop.
+"""Agent 运行时——核心 Tool Calling 循环。
 
-An Agent = LLM + private tool set + dual-layer loop:
-  Outer loop: call LLM → get response
-  Inner loop: if tool calls → execute tools → feed results back → repeat
+一个 Agent = LLM + 私有工具集 + 双层循环：
+  外层循环：调用 LLM → 获取响应
+  内层循环：如果有 tool calls → 执行工具 → 回馈结果 → 重复
 """
 
 from __future__ import annotations

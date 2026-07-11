@@ -25,7 +25,7 @@
 | Handoff 事件展示 | 已落地 | 前端展示 `handoff.started` / `handoff.completed` / `handoff.failed`。 |
 | LLM 语义标题 | 已落地 | 异步 LLM 生成会话标题，支持独立 `title_model` 配置，算法 fallback。 |
 | 单窗口启动 | 已落地 | `start.bat` 改为前台单窗口运行。 |
-| 自动化测试 | 已落地 | `python -m unittest -v` 运行 40 个测试通过。 |
+| 自动化测试 | 已落地 | `python -m unittest -v` 运行 87 个测试通过。 |
 
 ### 仍未完整落地
 
@@ -35,7 +35,7 @@
 | 事件持久化 | 未落地 | research/handoff 事件不持久化，刷新后丢失。 |
 | reviewer 审查流 | 未落地 | coder handoff 完成后尚无自动 reviewer 审查环节。 |
 | Checkpoint 历史回滚 | 类型预留 | `Checkpoint` / `FileSnapshot` 已定义，未接入完整历史系统。 |
-| 安全策略细分 | 粗粒度 | 缺少高危命令识别、只读白名单和路径边界保护。 |
+| 安全策略细分 | 已落地 | 命令风险分级（只读/普通/高危）、只读白名单自动放行、高危命令强制审批、路径边界保护。 |
 | 基础模块测试 | 不完整 | `SessionStore`、`AppConfig`、`PermissionManager`、`FileStagingArea`、`EditTool` 缺少独立测试。 |
 
 ## v0.2 验收标准

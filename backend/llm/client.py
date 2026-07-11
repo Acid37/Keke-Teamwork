@@ -1,4 +1,4 @@
-"""LLMClient facade — unified interface for all LLM providers."""
+"""LLMClient 门面——所有 LLM provider 的统一接口。"""
 
 import logging
 from collections.abc import AsyncIterator
@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class LLMClient:
-    """High-level LLM client that routes to the appropriate provider."""
+    """高级 LLM 客户端，路由到对应的 provider。"""
 
     def __init__(
         self,

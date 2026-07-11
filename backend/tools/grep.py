@@ -1,22 +1,24 @@
+import os
 import re
 import subprocess
 from pathlib import Path
 from backend.types import ToolResult
 from backend.tools.base import Tool, ToolCategory
+from backend.safety.path_guard import resolve_path, PathBoundaryError
 
 
 class GrepTool(Tool):
-    """Search file contents using pattern matching."""
+    """使用正则表达式搜索文件内容。"""
 
     name = "grep_search"
     category = ToolCategory.search
-    description = "Search for a pattern in files. Uses ripgrep if available, falls back to Python implementation."
+    description = "在文件中搜索匹配模式。优先使用 ripgrep，不可用时回退到 Python 实现。"
     parameters = {
         "type": "object",
         "properties": {
-            "pattern": {"type": "string", "description": "Search pattern (regex supported)"},
-            "path": {"type": "string", "description": "Directory or file to search in (default: work_dir)"},
-            "include": {"type": "string", "description": "Glob pattern to filter files (e.g., '*.py')"},
+            "pattern": {"type": "string", "description": "搜索模式（支持正则表达式）"},
+            "path": {"type": "string", "description": "搜索的目录或文件（默认：work_dir）"},
+            "include": {"type": "string", "description": "文件过滤的 glob 模式（如 '*.py'）"},
         },
         "required": ["pattern"],
     }
@@ -27,16 +29,17 @@ class GrepTool(Tool):
             path_str = kwargs.get("path")
             include = kwargs.get("include")
 
-            # Resolve path
+            # Resolve path with boundary protection
             if path_str:
-                search_path = Path(path_str)
-                if not search_path.is_absolute():
-                    search_path = self._ctx.work_dir / search_path
+                try:
+                    search_path = resolve_path(path_str, self._ctx.work_dir)
+                except PathBoundaryError as e:
+                    return (False, str(e))
             else:
-                search_path = self._ctx.work_dir
+                search_path = self._ctx.work_dir.resolve()
 
             if not search_path.exists():
-                return (False, f"Path not found: {search_path}")
+                return (False, f"路径未找到: {search_path}")
 
             # Try ripgrep first
             try:
@@ -67,13 +70,13 @@ class GrepTool(Tool):
                         # Limit to 100 results
                         if len(matches) > 100:
                             matches = matches[:100]
-                            matches.append("... (results truncated)")
+                            matches.append("... (结果已截断)")
                         return (True, "\n".join(matches))
                     else:
-                        return (True, "No matches found")
+                        return (True, "未找到匹配")
                 elif result.returncode == 1:
                     # No matches
-                    return (True, "No matches found")
+                    return (True, "未找到匹配")
                 # If rg fails for other reasons, fall through to Python implementation
 
             except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -87,7 +90,7 @@ class GrepTool(Tool):
             try:
                 pattern_re = re.compile(pattern, re.IGNORECASE)
             except re.error as e:
-                return (False, f"Invalid regex pattern: {e}")
+                return (False, f"无效的正则表达式: {e}")
 
             if search_path.is_file():
                 files_to_search = [search_path]
