@@ -13,6 +13,25 @@ export interface AgentDefinition {
   description: string;
 }
 
+// ─── 多 provider / 多 model ───
+
+export interface APIProvider {
+  name: string;
+  client_type: 'openai' | 'anthropic' | 'gemini';
+  base_url: string;
+  api_key?: string;
+  api_key_masked?: string;
+  enabled: boolean;
+}
+
+export interface ModelInfo {
+  name: string;
+  model_id: string;
+  provider_name: string;
+  max_context: number | null;
+  extra_params: Record<string, any>;
+}
+
 export interface ToolInfo {
   name: string;
   description: string;

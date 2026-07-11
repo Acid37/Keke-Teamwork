@@ -15,8 +15,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 
 from backend.agent_store import AgentStore
-from backend.config import AppearanceConfig, AppConfig
-from backend.llm.client import LLMClient
+from backend.config import AppearanceConfig, AppConfig, APIProvider, ModelInfo, VALID_CLIENT_TYPES
+from backend.llm.client import LLMClient, LLMClientFactory
 from backend.orchestrator import AgentOrchestrator
 from backend.safety.permission import PermissionManager
 from backend.session import SessionStore
@@ -42,6 +42,7 @@ class WebSocketServer:
     def __init__(self, config: AppConfig):
         self._config = config
         self._llm = self._create_llm(config)
+        self._llm_factory = LLMClientFactory(config)
         self._store = SessionStore(config.data_dir)
         self._agent_store = AgentStore(config.data_dir)
         self._appearance = AppearanceConfig.load()
@@ -52,16 +53,34 @@ class WebSocketServer:
 
     @staticmethod
     def _create_llm(config: AppConfig) -> LLMClient:
+        # 优先用 main_model 角色对应的 model 别名；否则兜底
+        model_info = config.get_model_for_role("main")
+        if model_info is None:
+            return LLMClient(
+                provider=config.provider,
+                api_key=config.api_key,
+                base_url=config.base_url,
+                model=config.main_model,
+            )
+        provider = config.get_provider(model_info.provider_name)
+        if provider is None:
+            return LLMClient(
+                provider=config.provider,
+                api_key=config.api_key,
+                base_url=config.base_url,
+                model=config.main_model,
+            )
         return LLMClient(
-            provider=config.provider,
-            api_key=config.api_key,
-            base_url=config.base_url,
-            model=config.main_model,
+            provider=provider.client_type,
+            api_key=provider.api_key,
+            base_url=provider.base_url,
+            model=model_info.model_id,
         )
 
     def _reload_llm(self) -> None:
         """Recreate the LLM client after config change."""
         self._llm = self._create_llm(self._config)
+        self._llm_factory.invalidate()
         self._orchestrator = self._create_orchestrator()
 
     def _create_orchestrator(self) -> AgentOrchestrator:
@@ -71,6 +90,7 @@ class WebSocketServer:
             agent_store=self._agent_store,
             permission_managers=self._permission_managers,
             session_store=self._store,
+            llm_factory=self._llm_factory,
         )
 
     def create_app(self) -> FastAPI:
@@ -129,27 +149,53 @@ class WebSocketServer:
             return {"status": "ok", "config": self._config.to_dict()}
 
         @app.get("/api/models")
-        async def list_models():
-            """Fetch available models from the configured API."""
+        async def list_models(provider: str | None = None):
+            """Fetch available models from a provider.
+
+            - provider: 必填，引用 APIProvider.name。未提供或找不到时回退到 main 角色。
+            """
             import httpx
 
             cfg = self._config
-            # Anthropic doesn't have a models listing endpoint
-            if cfg.provider == "anthropic":
+            target: APIProvider | None = None
+            if provider:
+                target = cfg.get_provider(provider)
+            if target is None:
+                # 回退到 main 角色对应的 provider
+                main_model = cfg.get_model_for_role("main")
+                if main_model:
+                    target = cfg.get_provider(main_model.provider_name)
+            if target is None and cfg.providers:
+                target = cfg.providers[0]
+            if target is None:
+                return {"models": [], "error": "No provider configured"}
+
+            if not target.enabled:
+                return {"models": [], "error": "Provider disabled"}
+
+            if target.client_type == "anthropic":
                 return {"models": [
                     "claude-sonnet-4-20250514",
                     "claude-opus-4-20250514",
                     "claude-3-5-sonnet-20241022",
                     "claude-3-5-haiku-20241022",
                 ]}
+            if target.client_type == "gemini":
+                return {"models": [
+                    "gemini-2.0-flash-exp",
+                    "gemini-1.5-pro",
+                    "gemini-1.5-flash",
+                ]}
 
-            # OpenAI-compatible: GET {base_url}/models
+            # OpenAI 兼容：GET {base_url}/models
+            if not target.base_url:
+                return {"models": [], "error": "Provider missing base_url"}
             try:
-                base = cfg.base_url.rstrip("/")
+                base = target.base_url.rstrip("/")
                 async with httpx.AsyncClient(timeout=10) as client:
                     resp = await client.get(
                         f"{base}/models",
-                        headers={"Authorization": f"Bearer {cfg.api_key}"},
+                        headers={"Authorization": f"Bearer {target.api_key}"},
                     )
                     resp.raise_for_status()
                     data = resp.json()
@@ -159,6 +205,205 @@ class WebSocketServer:
             except Exception as e:
                 logger.warning("Failed to fetch models: %s", e)
                 return {"models": [], "error": str(e)}
+
+        # ─── Provider CRUD ───
+
+        @app.post("/api/config/providers")
+        async def add_provider(request: Request):
+            body = await request.json()
+            try:
+                name = body.get("name", "").strip()
+                if not name:
+                    return JSONResponse({"error": "name is required"}, status_code=400)
+                if self._config.get_provider(name):
+                    return JSONResponse(
+                        {"error": f"Provider '{name}' already exists"},
+                        status_code=409,
+                    )
+                client_type = body.get("client_type", "openai")
+                if client_type not in VALID_CLIENT_TYPES:
+                    return JSONResponse(
+                        {"error": f"Invalid client_type: {client_type}"},
+                        status_code=400,
+                    )
+                api_key = body.get("api_key", "")
+                # 如果用户填了 masked key 就不覆盖
+                if "****" in api_key:
+                    api_key = ""
+                provider = APIProvider(
+                    name=name,
+                    client_type=client_type,
+                    base_url=body.get("base_url", ""),
+                    api_key=api_key,
+                    enabled=body.get("enabled", True),
+                )
+                self._config.providers.append(provider)
+                self._config.save()
+                self._reload_llm()
+                return {"status": "ok", "provider": provider.to_dict()}
+            except Exception as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+
+        @app.put("/api/config/providers/{name}")
+        async def update_provider(name: str, request: Request):
+            body = await request.json()
+            provider = self._config.get_provider(name)
+            if not provider:
+                return JSONResponse(
+                    {"error": f"Provider '{name}' not found"}, status_code=404
+                )
+            if "client_type" in body and body["client_type"] in VALID_CLIENT_TYPES:
+                provider.client_type = body["client_type"]
+            if "base_url" in body:
+                provider.base_url = body["base_url"]
+            if "enabled" in body:
+                provider.enabled = body["enabled"]
+            if "api_key" in body:
+                new_key = body["api_key"]
+                if new_key and "****" not in new_key:
+                    provider.api_key = new_key
+            # 改名
+            if "name" in body and body["name"] and body["name"] != name:
+                new_name = body["name"].strip()
+                if self._config.get_provider(new_name):
+                    return JSONResponse(
+                        {"error": f"Provider '{new_name}' already exists"},
+                        status_code=409,
+                    )
+                # 同步更新引用此 provider 的 models
+                old_name = provider.name
+                provider.name = new_name
+                for m in self._config.models:
+                    if m.provider_name == old_name:
+                        m.provider_name = new_name
+            self._config.save()
+            self._reload_llm()
+            return {"status": "ok", "provider": provider.to_dict()}
+
+        @app.delete("/api/config/providers/{name}")
+        async def delete_provider(name: str):
+            provider = self._config.get_provider(name)
+            if not provider:
+                return JSONResponse(
+                    {"error": f"Provider '{name}' not found"}, status_code=404
+                )
+            # 检查是否有 model 引用
+            ref_models = [m for m in self._config.models if m.provider_name == name]
+            if ref_models:
+                return JSONResponse(
+                    {
+                        "error": (
+                            f"Provider '{name}' 仍被 {len(ref_models)} 个 model 引用："
+                            f"{[m.name for m in ref_models]}"
+                        )
+                    },
+                    status_code=400,
+                )
+            self._config.providers.remove(provider)
+            self._config.save()
+            self._reload_llm()
+            return {"status": "ok"}
+
+        # ─── Model CRUD ───
+
+        @app.post("/api/config/models")
+        async def add_model(request: Request):
+            body = await request.json()
+            try:
+                name = body.get("name", "").strip()
+                if not name:
+                    return JSONResponse({"error": "name is required"}, status_code=400)
+                if self._config.get_model(name):
+                    return JSONResponse(
+                        {"error": f"Model '{name}' already exists"},
+                        status_code=409,
+                    )
+                provider_name = body.get("provider_name", "").strip()
+                if not self._config.get_provider(provider_name):
+                    return JSONResponse(
+                        {"error": f"Provider '{provider_name}' not found"},
+                        status_code=400,
+                    )
+                model = ModelInfo(
+                    name=name,
+                    model_id=body.get("model_id", "").strip(),
+                    provider_name=provider_name,
+                    max_context=body.get("max_context"),
+                    extra_params=body.get("extra_params", {}),
+                )
+                self._config.models.append(model)
+                self._config.save()
+                self._reload_llm()
+                return {"status": "ok", "model": model.to_dict()}
+            except Exception as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+
+        @app.put("/api/config/models/{name}")
+        async def update_model(name: str, request: Request):
+            body = await request.json()
+            model = self._config.get_model(name)
+            if not model:
+                return JSONResponse(
+                    {"error": f"Model '{name}' not found"}, status_code=404
+                )
+            if "provider_name" in body:
+                new_pname = body["provider_name"].strip()
+                if not self._config.get_provider(new_pname):
+                    return JSONResponse(
+                        {"error": f"Provider '{new_pname}' not found"},
+                        status_code=400,
+                    )
+                model.provider_name = new_pname
+            if "model_id" in body:
+                model.model_id = body["model_id"].strip()
+            if "max_context" in body:
+                model.max_context = body["max_context"]
+            if "extra_params" in body and isinstance(body["extra_params"], dict):
+                model.extra_params = body["extra_params"]
+            # 改名
+            if "name" in body and body["name"] and body["name"] != name:
+                new_name = body["name"].strip()
+                if self._config.get_model(new_name):
+                    return JSONResponse(
+                        {"error": f"Model '{new_name}' already exists"},
+                        status_code=409,
+                    )
+                old_name = model.name
+                model.name = new_name
+                # 同步角色映射
+                for role_attr in ("main_model", "coder_model", "research_model", "title_model"):
+                    if getattr(self._config, role_attr) == old_name:
+                        setattr(self._config, role_attr, new_name)
+            self._config.save()
+            self._reload_llm()
+            return {"status": "ok", "model": model.to_dict()}
+
+        @app.delete("/api/config/models/{name}")
+        async def delete_model(name: str):
+            model = self._config.get_model(name)
+            if not model:
+                return JSONResponse(
+                    {"error": f"Model '{name}' not found"}, status_code=404
+                )
+            # 检查角色引用
+            used_by_roles = []
+            for role_attr in ("main_model", "coder_model", "research_model", "title_model"):
+                if getattr(self._config, role_attr) == name:
+                    used_by_roles.append(role_attr)
+            if used_by_roles:
+                return JSONResponse(
+                    {
+                        "error": (
+                            f"Model '{name}' 仍被角色引用：{used_by_roles}，"
+                            "请先把角色映射改为其他 model。"
+                        )
+                    },
+                    status_code=400,
+                )
+            self._config.models.remove(model)
+            self._config.save()
+            self._reload_llm()
+            return {"status": "ok"}
 
         # ─── Agent CRUD ───
 
