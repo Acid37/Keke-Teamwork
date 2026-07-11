@@ -20,7 +20,7 @@ class AppConfig:
     provider: str = "openai"          # "openai" | "anthropic" | "gemini"
     api_key: str = ""
     base_url: str = "https://api.deepseek.com/v1"
-    main_model: str = "deepseek-chat"
+    main_model: str = "deepseek-v3"
     coder_model: str | None = None    # None = same as main
     research_model: str | None = None # None = same as main
     title_model: str | None = None    # None = same as main

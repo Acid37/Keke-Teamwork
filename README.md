@@ -143,12 +143,12 @@ start.bat
 3. 设置 API 地址和模型名
 4. 保存配置
 
-默认配置偏向 DeepSeek OpenAI-compatible 接口：
+默认配置兼容任意 OpenAI-compatible 接口，例如：
 
 ```text
 Provider: openai
 Base URL: https://api.deepseek.com/v1
-Model: deepseek-chat
+Model: deepseek-v3
 ```
 
 也可以通过环境变量覆盖配置：
