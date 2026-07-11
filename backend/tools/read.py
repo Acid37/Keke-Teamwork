@@ -1,12 +1,13 @@
 from pathlib import Path
 from backend.types import ToolResult
-from backend.tools.base import Tool
+from backend.tools.base import Tool, ToolCategory
 
 
 class ReadTool(Tool):
     """Read file contents with line numbers."""
 
     name = "read_file"
+    category = ToolCategory.search
     description = "Read the contents of a file. Supports line range selection and handles large files intelligently."
     parameters = {
         "type": "object",

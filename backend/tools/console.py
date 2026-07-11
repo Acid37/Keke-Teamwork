@@ -1,13 +1,14 @@
 import asyncio
 import os
 from backend.types import ToolResult
-from backend.tools.base import Tool
+from backend.tools.base import Tool, ToolCategory
 
 
 class ConsoleTool(Tool):
     """Execute shell commands."""
 
     name = "run_console"
+    category = ToolCategory.shell
     description = "Execute a shell command and return the output."
     parameters = {
         "type": "object",

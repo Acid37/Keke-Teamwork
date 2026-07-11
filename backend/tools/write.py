@@ -1,12 +1,13 @@
 from pathlib import Path
 from backend.types import ToolResult
-from backend.tools.base import Tool
+from backend.tools.base import Tool, ToolCategory
 
 
 class WriteTool(Tool):
     """Write or create files."""
 
     name = "write_file"
+    category = ToolCategory.file
     description = "Write content to a file. Creates the file if it doesn't exist, overwrites if it does."
     parameters = {
         "type": "object",

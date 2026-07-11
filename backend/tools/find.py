@@ -1,13 +1,14 @@
 import os
 from pathlib import Path
 from backend.types import ToolResult
-from backend.tools.base import Tool
+from backend.tools.base import Tool, ToolCategory
 
 
 class FindTool(Tool):
     """Find files by name pattern."""
 
     name = "find_files"
+    category = ToolCategory.search
     description = "Find files matching a glob pattern."
     parameters = {
         "type": "object",

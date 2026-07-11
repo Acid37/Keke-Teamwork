@@ -2,13 +2,14 @@ import re
 import subprocess
 from pathlib import Path
 from backend.types import ToolResult
-from backend.tools.base import Tool
+from backend.tools.base import Tool, ToolCategory
 
 
 class GrepTool(Tool):
     """Search file contents using pattern matching."""
 
     name = "grep_search"
+    category = ToolCategory.search
     description = "Search for a pattern in files. Uses ripgrep if available, falls back to Python implementation."
     parameters = {
         "type": "object",

@@ -59,6 +59,32 @@ _DEFAULT_AGENTS: list[dict] = [
         "color": "#e0af68",
         "description": "专注编码实现，拥有文件读写和命令执行权限",
     },
+    {
+        "agent_id": "reviewer",
+        "name": "代码审查员",
+        "role": "reviewer",
+        "system_prompt": "",
+        "provider": None,
+        "model": None,
+        "temperature": 0.2,
+        "tools": ["read_file", "grep_search", "find_files", "list_directory"],
+        "max_tool_rounds": 30,
+        "color": "#f7768e",
+        "description": "只读审查角色，检查代码质量、风格和潜在问题",
+    },
+    {
+        "agent_id": "doc_writer",
+        "name": "文档撰写师",
+        "role": "doc_writer",
+        "system_prompt": "",
+        "provider": None,
+        "model": None,
+        "temperature": 0.6,
+        "tools": ["read_file", "write_file", "edit_file", "grep_search", "find_files", "list_directory"],
+        "max_tool_rounds": 40,
+        "color": "#bb9af7",
+        "description": "文档撰写角色，可读写文件和搜索内容，无命令执行权限",
+    },
 ]
 
 

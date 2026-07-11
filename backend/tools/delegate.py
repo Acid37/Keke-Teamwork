@@ -1,11 +1,12 @@
 from backend.types import ToolResult
-from backend.tools.base import Tool
+from backend.tools.base import Tool, ToolCategory
 
 
 class DelegateTool(Tool):
     """Delegate a focused subtask to another configured agent."""
 
     name = "delegate_agent"
+    category = ToolCategory.coding
     description = (
         "Delegate a focused read-only research subtask to another agent and return "
         "its summarized findings. First version is intended for researcher agents."

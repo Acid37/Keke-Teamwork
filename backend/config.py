@@ -21,9 +21,13 @@ class AppConfig:
     api_key: str = ""
     base_url: str = "https://api.deepseek.com"
     main_model: str = "deepseek-v4-flash"
-    coder_model: str | None = None    # None = same as main
-    research_model: str | None = None # None = same as main
-    title_model: str | None = None    # None = same as main
+    # 以下三个字段是"默认回退值"：当 Agent 定义未指定 per-agent model 时，
+    # 按角色回退到这些值；如果这些也为 None，则回退到 main_model。
+    # 任何自定义角色只要在 Agent 定义里设置了 model 字段，就优先使用 per-agent model，
+    # 这三个字段不会被使用。详见 _resolve_model() 优先级链。
+    coder_model: str | None = None    # coder 角色未指定 model 时的回退值
+    research_model: str | None = None # researcher 角色未指定 model 时的回退值
+    title_model: str | None = None    # 标题生成未指定 model 时的回退值
 
     # ─── Server ───
     host: str = "127.0.0.1"

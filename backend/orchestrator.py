@@ -20,7 +20,7 @@ from backend.llm.client import LLMClient
 from backend.safety.file_staging import FileStagingArea
 from backend.safety.permission import PermissionManager
 from backend.session import SessionStore
-from backend.tools import ALL_TOOLS, resolve_tools
+from backend.tools import ALL_TOOLS, resolve_tools, is_read_only_tool_set, has_write_tool
 from backend.types import AgentDefinition, AgentResult, MergedResearchResult, ParallelResearchResult, Phase, Session, ToolContext
 
 logger = logging.getLogger(__name__)
@@ -919,24 +919,17 @@ class AgentOrchestrator:
     def _resolve_agent(self, agent_id: str) -> AgentDefinition | None:
         return self._agent_store.get_agent(agent_id) or self._agent_store.get_agent("main")
 
-    # ─── Tool classification ───
-
-    READ_ONLY_TOOLS = frozenset({
-        "read_file", "grep_search", "find_files", "list_directory",
-    })
-    WRITE_TOOLS = frozenset({
-        "write_file", "edit_file", "run_console",
-    })
+    # ─── Tool classification (delegated to tools module) ───
 
     @classmethod
     def _is_read_only_agent(cls, agent_def: AgentDefinition) -> bool:
         """An agent is read-only if it has no write/shell tools."""
-        return not any(t in cls.WRITE_TOOLS for t in agent_def.tools)
+        return is_read_only_tool_set(agent_def.tools)
 
     @classmethod
     def _has_write_tools(cls, agent_def: AgentDefinition) -> bool:
         """An agent has write capability if it owns any write/shell tool."""
-        return any(t in cls.WRITE_TOOLS for t in agent_def.tools)
+        return has_write_tool(agent_def.tools)
 
     def _should_run_parallel_research(
         self,

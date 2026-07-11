@@ -29,19 +29,19 @@
 
 ## 下一步
 
-### 阶段 1：角色真正自定义（进行中）
+### 阶段 1：角色真正自定义（已完成）
 
 - [x] 去掉 `_resolve_model` 角色硬编码，所有角色统一走 `agent_def.model → 角色回退 → main_model`。
 - [x] 前端 Agent 管理已支持 per-agent 模型选择（`formModel` 字段 + 模型下拉框）。
 - [x] Agent 分流从角色名判断改为工具权限判断（`_is_read_only_agent` / `_has_write_tools`）。
-- [ ] 全局配置里的 `coder_model`/`research_model`/`title_model` 降级为"默认回退值"文档说明。
-- [ ] 默认 Agent 定义从 3 个扩展到示例集（main/researcher/coder/reviewer/文档撰写师），展示自定义能力。
+- [x] 全局配置里的 `coder_model`/`research_model`/`title_model` 降级为"默认回退值"文档说明。
+- [x] 默认 Agent 定义从 3 个扩展到示例集（main/researcher/coder/reviewer/doc_writer），展示自定义能力。
 
 ### 阶段 2：工具可插拔（为非 coding 场景预留）
 
-- [ ] 工具注册改为分类注册（`coding`/`search`/`file`/`shell`/`mcp`），Agent 定义里按分类选工具。
+- [x] 工具注册改为分类注册（`coding`/`search`/`file`/`shell`/`mcp`），Agent 定义里按分类选工具。
 - [ ] 预留 MCP 工具接入接口。
-- [ ] `delegate_agent` 的只读/handoff 分流逻辑从硬编码工具列表改为按工具分类判断。
+- [x] `delegate_agent` 的只读/handoff 分流逻辑从硬编码工具列表改为按工具分类判断。
 
 ### 阶段 3：GUI 参考 MoFox 优化
 

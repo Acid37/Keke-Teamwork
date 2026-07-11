@@ -280,9 +280,14 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
                 context="real AgentStore defaults",
             )
 
-            self.assertEqual(merged.successful_sources, ["researcher"])
+            # 默认 AgentStore 现在包含 researcher 和 reviewer 两个只读 Agent，
+            # 它们都应被选为并行 researcher 候选（按工具权限分流，不按角色名）。
+            self.assertCountEqual(merged.successful_sources, ["researcher", "reviewer"])
             self.assertIn("default findings from researcher", merged.text)
-            self.assertEqual(len(calls), 1)
+            self.assertIn("default findings from reviewer", merged.text)
+            self.assertEqual(len(calls), 2)
+            parent_ids = {c["parent_agent_id"] for c in calls}
+            self.assertEqual(parent_ids, {"main"})
             self.assertEqual(calls[0]["parent_agent_id"], "main")
             self.assertEqual(calls[0]["agent_id"], "researcher")
 

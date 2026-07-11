@@ -1,12 +1,13 @@
 from pathlib import Path
 from backend.types import ToolResult
-from backend.tools.base import Tool
+from backend.tools.base import Tool, ToolCategory
 
 
 class EditTool(Tool):
     """Search and replace text in files."""
 
     name = "edit_file"
+    category = ToolCategory.file
     description = "Replace text in a file. The old_text must match exactly (including whitespace)."
     parameters = {
         "type": "object",

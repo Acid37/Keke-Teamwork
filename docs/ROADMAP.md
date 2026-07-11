@@ -25,7 +25,7 @@
 | Handoff 事件展示 | 已落地 | 前端展示 `handoff.started` / `handoff.completed` / `handoff.failed`。 |
 | LLM 语义标题 | 已落地 | 异步 LLM 生成会话标题，支持独立 `title_model` 配置，算法 fallback。 |
 | 单窗口启动 | 已落地 | `start.bat` 改为前台单窗口运行。 |
-| 自动化测试 | 已落地 | `python -m unittest -v` 运行 21 个测试通过。 |
+| 自动化测试 | 已落地 | `python -m unittest -v` 运行 40 个测试通过。 |
 
 ### 仍未完整落地
 

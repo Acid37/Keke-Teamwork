@@ -1,12 +1,13 @@
 from pathlib import Path
 from backend.types import ToolResult
-from backend.tools.base import Tool
+from backend.tools.base import Tool, ToolCategory
 
 
 class LsTool(Tool):
     """List directory contents in tree format."""
 
     name = "list_directory"
+    category = ToolCategory.search
     description = "List directory contents in a tree format with configurable depth."
     parameters = {
         "type": "object",
