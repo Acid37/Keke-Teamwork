@@ -100,6 +100,7 @@ class Agent:
         tool_history: list[dict] = []
         usage = TokenUsage()
         tool_rounds = 0
+        llm_error: str | None = None
 
         while True:
             # ── Call LLM ──
@@ -136,6 +137,7 @@ class Agent:
                 if on_text:
                     await on_text(f"\n\n[Error: {error_msg}]")
                 total_text += f"\n\n[Error: {error_msg}]"
+                llm_error = error_msg
                 break
 
             total_text += round_text
@@ -246,6 +248,7 @@ class Agent:
             tool_calls_history=tool_history,
             usage=usage,
             messages=messages,
+            error=llm_error,
         )
 
     # ─── Internal helpers ───

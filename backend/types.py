@@ -205,6 +205,7 @@ class AgentResult:
     tool_calls_history: list[dict]
     usage: TokenUsage
     messages: list[dict]
+    error: str | None = None  # LLM 调用失败时设置，非 None 表示执行失败
 
 
 @dataclass

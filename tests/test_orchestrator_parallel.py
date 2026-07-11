@@ -10,6 +10,9 @@ from unittest.mock import patch
 from backend.agent_store import AgentStore
 from backend.config import AppConfig
 from backend.orchestrator import AgentOrchestrator
+from backend.research_runner import ResearchRunner
+from backend.title_service import TitleService
+from backend.tools import is_read_only_tool_set, has_write_tool
 from backend.types import AgentDefinition, AgentResult, ParallelResearchResult, Session, TokenUsage, ToolContext
 
 
@@ -116,10 +119,10 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
                 await asyncio.sleep(0.01)
             return f"findings from {agent_id}"
 
-        orchestrator._run_delegated_agent = fake_delegated_agent  # type: ignore[method-assign]
+        orchestrator._delegate_runner.run_delegated = fake_delegated_agent  # type: ignore[method-assign]
 
         start = time.perf_counter()
-        results = await orchestrator.run_parallel_researchers(
+        results = await orchestrator._research_runner.run_researchers(
             session=session,
             broadcast=broadcast,
             agent_def=main,
@@ -169,9 +172,9 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
         async def fake_delegated_agent(**kwargs) -> str:
             return f"findings from {kwargs['agent_id']}"
 
-        orchestrator._run_delegated_agent = fake_delegated_agent  # type: ignore[method-assign]
+        orchestrator._delegate_runner.run_delegated = fake_delegated_agent  # type: ignore[method-assign]
 
-        merged = await orchestrator.run_parallel_research(
+        merged = await orchestrator._research_runner.run_research(
             session=session,
             broadcast=broadcast,
             agent_id="main",
@@ -239,9 +242,9 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
             active -= 1
             return f"findings from {kwargs['agent_id']}"
 
-        orchestrator._run_delegated_agent = fake_delegated_agent  # type: ignore[method-assign]
+        orchestrator._delegate_runner.run_delegated = fake_delegated_agent  # type: ignore[method-assign]
 
-        merged = await orchestrator.run_parallel_entry(
+        merged = await orchestrator._research_runner.run_research(
             session=session,
             broadcast=broadcast,
             agent_id="main",
@@ -270,9 +273,9 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
                 calls.append(kwargs)
                 return f"default findings from {kwargs['agent_id']}"
 
-            orchestrator._run_delegated_agent = fake_delegated_agent  # type: ignore[method-assign]
+            orchestrator._delegate_runner.run_delegated = fake_delegated_agent  # type: ignore[method-assign]
 
-            merged = await orchestrator.run_parallel_entry(
+            merged = await orchestrator._research_runner.run_research(
                 session=session,
                 broadcast=broadcast,
                 agent_id="main",
@@ -306,9 +309,9 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
         async def fake_delegated_agent(**kwargs) -> str:
             return f"findings from {kwargs['agent_id']}"
 
-        orchestrator._run_delegated_agent = fake_delegated_agent  # type: ignore[method-assign]
+        orchestrator._delegate_runner.run_delegated = fake_delegated_agent  # type: ignore[method-assign]
 
-        merged = await orchestrator.run_parallel_research(
+        merged = await orchestrator._research_runner.run_research(
             session=session,
             broadcast=broadcast,
             agent_id="main",
@@ -334,7 +337,7 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
             async def fake_delegated_agent(**kwargs) -> str:
                 return f"findings from {kwargs['agent_id']}"
 
-            orchestrator._run_delegated_agent = fake_delegated_agent  # type: ignore[method-assign]
+            orchestrator._delegate_runner.run_delegated = fake_delegated_agent  # type: ignore[method-assign]
 
             with patch("backend.orchestrator.Agent", MainFlowFakeAgent):
                 await orchestrator.run_user_message(
@@ -375,7 +378,7 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
             async def fake_delegated_agent(**kwargs) -> str:
                 raise AssertionError("solo mode should not run parallel research")
 
-            orchestrator._run_delegated_agent = fake_delegated_agent  # type: ignore[method-assign]
+            orchestrator._delegate_runner.run_delegated = fake_delegated_agent  # type: ignore[method-assign]
 
             with patch("backend.orchestrator.Agent", MainFlowFakeAgent):
                 await orchestrator.run_user_message(
@@ -393,7 +396,7 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
         self.assertNotIn("[Parallel Research Summary]", LAST_MAIN_AGENT_CALL["user_message"])
 
     def test_merge_parallel_research_results_keeps_status_metadata(self) -> None:
-        merged = AgentOrchestrator.merge_parallel_research_results([
+        merged = ResearchRunner.merge([
             ParallelResearchResult(
                 text="alpha conclusion",
                 metadata={"source": "alpha", "timed_out": False},
@@ -419,7 +422,7 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
         self.assertEqual(merged.errored_sources, ["broken"])
 
     def test_merge_parallel_research_results_handles_empty_input(self) -> None:
-        merged = AgentOrchestrator.merge_parallel_research_results([])
+        merged = ResearchRunner.merge([])
 
         self.assertEqual(merged.text, "没有可合并的 researcher 结果。")
         self.assertEqual(merged.successful_sources, [])
@@ -427,7 +430,7 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
         self.assertEqual(merged.errored_sources, [])
 
     def test_research_summary_for_agent_includes_status_and_truncates(self) -> None:
-        merged = AgentOrchestrator.merge_parallel_research_results([
+        merged = ResearchRunner.merge([
             ParallelResearchResult(
                 text="alpha conclusion " * 20,
                 metadata={"source": "alpha", "timed_out": False},
@@ -444,7 +447,7 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
             ),
         ])
 
-        summary = AgentOrchestrator._format_research_summary_for_agent(
+        summary = ResearchRunner.format_summary_for_agent(
             task="inspect summary",
             merged=merged,
             max_chars=240,
@@ -460,8 +463,8 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
     def test_generate_session_title_from_first_user_message(self) -> None:
         session = Session(id="title-session", work_dir=Path("D:/example-project"))
 
-        self.assertTrue(AgentOrchestrator._should_generate_title(session))
-        title = AgentOrchestrator._generate_session_title(
+        self.assertTrue(TitleService.should_generate_title(session))
+        title = TitleService.generate_title(
             "请帮我修复左侧栏会话标题显示问题，并补测试",
             session.work_dir,
         )
@@ -485,9 +488,9 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
             title="Session 04:07",
         )
 
-        self.assertFalse(AgentOrchestrator._should_generate_title(project_session))
-        self.assertFalse(AgentOrchestrator._should_generate_title(user_session))
-        self.assertTrue(AgentOrchestrator._should_generate_title(placeholder_session))
+        self.assertFalse(TitleService.should_generate_title(project_session))
+        self.assertFalse(TitleService.should_generate_title(user_session))
+        self.assertTrue(TitleService.should_generate_title(placeholder_session))
 
     async def test_llm_title_generation_updates_session_and_broadcasts(self) -> None:
         from backend.types import StreamEvent
@@ -511,9 +514,9 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
                 async for event in fake_chat(**kwargs):
                     yield event
 
-        orchestrator._llm = FakeLLM()  # type: ignore[assignment]
+        orchestrator._title_service._llm = FakeLLM()  # type: ignore[assignment]
 
-        await orchestrator._update_title_with_llm(
+        await orchestrator._title_service.update_title_with_llm(
             session=session,
             user_text="请帮我修复左侧栏圆角问题",
             broadcast=broadcast,
@@ -541,9 +544,9 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
                 raise RuntimeError("API unavailable")
                 yield  # noqa: unreachable — make it an async generator
 
-        orchestrator._llm = BrokenLLM()  # type: ignore[assignment]
+        orchestrator._title_service._llm = BrokenLLM()  # type: ignore[assignment]
 
-        await orchestrator._update_title_with_llm(
+        await orchestrator._title_service.update_title_with_llm(
             session=session,
             user_text="请帮我修复左侧栏圆角问题",
             broadcast=broadcast,
@@ -581,8 +584,8 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
                 async for event in fake_chat(**kwargs):
                     yield event
 
-        with _patch("backend.orchestrator.LLMClient", FakeLLM):
-            await orchestrator._update_title_with_llm(
+        with _patch("backend.title_service.LLMClient", FakeLLM):
+            await orchestrator._title_service.update_title_with_llm(
                 session=session,
                 user_text="请帮我优化性能",
                 broadcast=broadcast,
@@ -613,11 +616,11 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
             tools=["read_file", "run_console"],
         )
 
-        self.assertTrue(AgentOrchestrator._is_read_only_agent(read_only_custom))
-        self.assertFalse(AgentOrchestrator._has_write_tools(read_only_custom))
+        self.assertTrue(is_read_only_tool_set(read_only_custom.tools))
+        self.assertFalse(has_write_tool(read_only_custom.tools))
 
-        self.assertFalse(AgentOrchestrator._is_read_only_agent(write_custom))
-        self.assertTrue(AgentOrchestrator._has_write_tools(write_custom))
+        self.assertFalse(is_read_only_tool_set(write_custom.tools))
+        self.assertTrue(has_write_tool(write_custom.tools))
 
-        self.assertFalse(AgentOrchestrator._is_read_only_agent(mixed))
-        self.assertTrue(AgentOrchestrator._has_write_tools(mixed))
+        self.assertFalse(is_read_only_tool_set(mixed.tools))
+        self.assertTrue(has_write_tool(mixed.tools))

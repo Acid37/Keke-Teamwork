@@ -14,6 +14,10 @@ from backend.tools import TOOL_REGISTRY
 from backend.tools.delegate import DelegateTool
 from backend.types import AgentDefinition, AgentResult, Phase, Session, TokenUsage, ToolContext
 
+# 策略 B 拆分后，delegate/handoff 逻辑移到 DelegateRunner，
+# Agent patch 路径改为 backend.delegate_runner.Agent。
+# run_user_message 主流程仍在 orchestrator.py，需要双 patch。
+
 
 class FakeBroadcast:
     def __init__(self) -> None:
@@ -189,8 +193,8 @@ class DelegateAgentTests(IsolatedAsyncioTestCase):
                 permission_managers={},
             )
 
-            with patch("backend.orchestrator.Agent", FakeAgent):
-                result = await orchestrator._run_delegated_agent(
+            with patch("backend.delegate_runner.Agent", FakeAgent):
+                result = await orchestrator._delegate_runner.run_delegated(
                     session=session,
                     broadcast=broadcast,
                     parent_agent_id="main",
@@ -295,8 +299,8 @@ class DelegateAgentTests(IsolatedAsyncioTestCase):
                 permission_managers={},
             )
 
-            with patch("backend.orchestrator.Agent", FakeAgent):
-                result = await orchestrator._run_handoff_agent(
+            with patch("backend.delegate_runner.Agent", FakeAgent):
+                result = await orchestrator._delegate_runner.run_handoff(
                     session=session,
                     broadcast=broadcast,
                     parent_agent_id="main",
@@ -430,7 +434,8 @@ class DelegateAgentTests(IsolatedAsyncioTestCase):
                 permission_managers={},
             )
 
-            with patch("backend.orchestrator.Agent", FakeAgent):
+            with patch("backend.orchestrator.Agent", FakeAgent), \
+                 patch("backend.delegate_runner.Agent", FakeAgent):
                 await orchestrator.run_user_message(
                     session=session,
                     text="please implement this",

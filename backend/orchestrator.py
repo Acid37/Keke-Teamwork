@@ -15,12 +15,16 @@ from uuid import uuid4
 from backend.agent import Agent
 from backend.agent_store import AgentStore
 from backend.config import AppConfig
-from backend.llm.client import LLMClient
+from backend.delegate_runner import DelegateRunner
+from backend.model_resolver import ModelResolver
+from backend.prompt_builder import build_system_prompt
+from backend.research_runner import ResearchRunner
 from backend.safety.file_staging import FileStagingArea
 from backend.safety.permission import PermissionManager
 from backend.session import SessionStore
-from backend.tools import ALL_TOOLS, resolve_tools, is_read_only_tool_set, has_write_tool
-from backend.types import AgentDefinition, AgentResult, MergedResearchResult, ParallelResearchResult, Phase, Session, ToolContext
+from backend.title_service import TitleService
+from backend.tools import ALL_TOOLS, has_write_tool, is_read_only_tool_set, resolve_tools
+from backend.types import AgentDefinition, Phase, Session, ToolContext
 
 logger = logging.getLogger(__name__)
 
@@ -30,24 +34,33 @@ Broadcast = Callable[[str, dict], Awaitable[None]]
 class AgentOrchestrator:
     """协调会话中的 Agent 执行。
 
-    首版实现有意保留现有单 Agent 路径。关键变化是职责归属：
-    WebSocketServer 不再需要知道如何构建 agent、staging、permission manager 和回调。
+    职责仅限于消息分发与组件接线——并行研究、委派/handoff、
+    标题生成、模型解析和提示词构建分别委托到独立模块。
     """
 
     def __init__(
         self,
         *,
         config: AppConfig,
-        llm: LLMClient,
+        llm,
         agent_store: AgentStore,
         permission_managers: dict[str, PermissionManager],
         session_store: SessionStore | None = None,
+        llm_factory=None,
     ):
         self._config = config
         self._llm = llm
         self._agent_store = agent_store
         self._permission_managers = permission_managers
         self._session_store = session_store
+        self._llm_factory = llm_factory
+
+        self._model_resolver = ModelResolver(config, llm, llm_factory=llm_factory)
+        self._delegate_runner = DelegateRunner(config, agent_store, self._model_resolver)
+        self._research_runner = ResearchRunner(config, agent_store, self._delegate_runner)
+        self._title_service = TitleService(config, session_store, llm)
+
+    # ─── 主入口 ───
 
     async def run_user_message(
         self,
@@ -61,19 +74,19 @@ class AgentOrchestrator:
         session.phase = Phase.THINKING
         session.last_active_at = time.time()
 
-        # Add user message to history.
+        # 添加用户消息到历史
         session.messages.append({"role": "user", "content": text})
-        if self._should_generate_title(session):
-            session.title = self._generate_session_title(text, session.work_dir)
+        if self._title_service.should_generate_title(session):
+            session.title = self._title_service.generate_title(text, session.work_dir)
             asyncio.create_task(
-                self._update_title_with_llm(
+                self._title_service.update_title_with_llm(
                     session=session,
                     user_text=text,
                     broadcast=broadcast,
                 )
             )
 
-        # Phase B placeholder: solo mode keeps current behavior explicit.
+        # Solo 模式强制使用 main Agent
         if session.solo_mode:
             agent_id = "main"
 
@@ -85,9 +98,9 @@ class AgentOrchestrator:
             })
             return
 
-        effective_model = self._resolve_model(agent_def)
+        effective_model = self._model_resolver.resolve_model(agent_def)
         effective_provider = agent_def.provider or self._config.provider
-        llm = self._create_llm_for_agent(agent_def, effective_model, effective_provider)
+        llm = self._model_resolver.create_llm_for_agent(agent_def, effective_model, effective_provider)
 
         agent_tools = resolve_tools(agent_def.tools) if agent_def.tools else ALL_TOOLS
 
@@ -103,17 +116,18 @@ class AgentOrchestrator:
             "color": agent_def.color,
         })
 
+        # 并行研究
         research_summary = ""
-        if self._should_run_parallel_research(session, agent_def):
+        if self._research_runner.should_run_research(session, agent_def):
             try:
-                merged_research = await self.run_parallel_research(
+                merged_research = await self._research_runner.run_research(
                     session=session,
                     task=text,
                     context="用户消息进入主 Agent 前的只读研究。",
                     agent_id=agent_def.agent_id,
                     broadcast=broadcast,
                 )
-                research_summary = self._format_research_summary_for_agent(
+                research_summary = self._research_runner.format_summary_for_agent(
                     task=text,
                     merged=merged_research,
                 )
@@ -174,8 +188,8 @@ class AgentOrchestrator:
 
         async def run_child_agent(agent_id: str, task: str, context: str = "") -> str:
             child_def = self._agent_store.get_agent(agent_id)
-            if child_def and self._has_write_tools(child_def):
-                return await self._run_handoff_agent(
+            if child_def and has_write_tool(child_def.tools):
+                return await self._delegate_runner.run_handoff(
                     session=session,
                     broadcast=broadcast,
                     parent_agent_id=aid,
@@ -185,7 +199,7 @@ class AgentOrchestrator:
                     staging=staging,
                     permission_mgr=permission_mgr,
                 )
-            return await self._run_delegated_agent(
+            return await self._delegate_runner.run_delegated(
                 session=session,
                 broadcast=broadcast,
                 parent_agent_id=aid,
@@ -217,11 +231,11 @@ class AgentOrchestrator:
         agent.system_prompt = (
             agent_def.system_prompt
             if agent_def.system_prompt
-            else self._build_system_prompt(session)
+            else build_system_prompt(session)
         )
 
         try:
-            agent_user_message = self._build_agent_user_message(
+            agent_user_message = ResearchRunner.build_agent_user_message(
                 user_text=text,
                 research_summary=research_summary,
             )
@@ -253,6 +267,9 @@ class AgentOrchestrator:
                 on_tool_call=broadcast_tool_call,
                 on_tool_result=broadcast_tool_result,
             )
+
+            if result.error:
+                raise RuntimeError(result.error)
 
             session.messages = result.messages
             if research_summary and session.messages:
@@ -333,591 +350,10 @@ class AgentOrchestrator:
         finally:
             self._permission_managers.pop(session.id, None)
 
-    async def run_parallel_entry(
-        self,
-        *,
-        session: Session,
-        task: str,
-        context: str = "",
-        agent_id: str = "main",
-        broadcast: Broadcast,
-        timeout: float | None = None,
-        max_workers: int | None = None,
-    ) -> MergedResearchResult:
-        """兼容入口：运行一次只读并行研究。优先使用 run_parallel_research。"""
-        return await self.run_parallel_research(
-            session=session,
-            task=task,
-            context=context,
-            agent_id=agent_id,
-            broadcast=broadcast,
-            timeout=timeout,
-            max_workers=max_workers,
-        )
-
-    async def run_parallel_research(
-        self,
-        *,
-        session: Session,
-        task: str,
-        context: str = "",
-        agent_id: str = "main",
-        broadcast: Broadcast,
-        timeout: float | None = None,
-        max_workers: int | None = None,
-    ) -> MergedResearchResult:
-        """面向会话流程的只读并行研究入口。"""
-        agent_def = self._resolve_agent(agent_id)
-        if not agent_def:
-            return self.merge_parallel_research_results([])
-        results = await self.run_parallel_researchers(
-            session=session,
-            broadcast=broadcast,
-            agent_def=agent_def,
-            task=task,
-            context=context,
-            timeout=timeout,
-            max_workers=max_workers or self._config.max_parallel_researchers,
-        )
-        merged = self.merge_parallel_research_results(results)
-        await broadcast("research.completed", {
-            "parent_agent_id": agent_def.agent_id,
-            "task": task,
-            "merged_text": merged.text,
-            "successful_sources": merged.successful_sources,
-            "timed_out_sources": merged.timed_out_sources,
-            "errored_sources": merged.errored_sources,
-            "result_count": len(results),
-        })
-        return merged
-
-    async def run_parallel_researchers(
-        self,
-        *,
-        session: Session,
-        broadcast: Broadcast,
-        agent_def: AgentDefinition,
-        task: str,
-        context: str = "",
-        timeout: float | None = None,
-        max_workers: int = 3,
-    ) -> list[ParallelResearchResult]:
-        """并发运行可用的只读 Agent，且只允许只读工具。"""
-        max_workers = max(1, max_workers)
-        candidates = [
-            candidate
-            for candidate in self._agent_store.list_agents()
-            if self._is_read_only_agent(candidate) and candidate.agent_id != agent_def.agent_id
-        ]
-        if not candidates and self._is_read_only_agent(agent_def):
-            candidates = [agent_def]
-
-        semaphore = asyncio.Semaphore(max_workers)
-
-        async def run_one(researcher: AgentDefinition) -> ParallelResearchResult:
-            async with semaphore:
-                base_payload = {
-                    "agent_id": researcher.agent_id,
-                    "agent_name": researcher.name,
-                    "role": researcher.role,
-                    "parent_agent_id": agent_def.agent_id,
-                    "task": task,
-                }
-                await broadcast("research.started", base_payload)
-                try:
-                    result_text = await asyncio.wait_for(
-                        self._run_delegated_agent(
-                            session=session,
-                            broadcast=broadcast,
-                            parent_agent_id=agent_def.agent_id,
-                            agent_id=researcher.agent_id,
-                            task=task,
-                            context=context,
-                        ),
-                        timeout=timeout,
-                    )
-                    await broadcast("research.result", {
-                        **base_payload,
-                        "text": result_text,
-                        "timed_out": False,
-                        "error": None,
-                    })
-                    return ParallelResearchResult(
-                        text=result_text,
-                        metadata={
-                            "source": researcher.agent_id,
-                            "agent_name": researcher.name,
-                            "role": researcher.role,
-                            "timed_out": False,
-                        },
-                    )
-                except asyncio.TimeoutError:
-                    await broadcast("research.failed", {
-                        **base_payload,
-                        "text": "",
-                        "timed_out": True,
-                        "error": "timed out",
-                    })
-                    return ParallelResearchResult(
-                        text="",
-                        metadata={
-                            "source": researcher.agent_id,
-                            "agent_name": researcher.name,
-                            "role": researcher.role,
-                            "timed_out": True,
-                        },
-                        error="timed out",
-                    )
-                except Exception as exc:
-                    await broadcast("research.failed", {
-                        **base_payload,
-                        "text": "",
-                        "timed_out": False,
-                        "error": str(exc),
-                    })
-                    return ParallelResearchResult(
-                        text="",
-                        metadata={
-                            "source": researcher.agent_id,
-                            "agent_name": researcher.name,
-                            "role": researcher.role,
-                            "timed_out": False,
-                        },
-                        error=str(exc),
-                    )
-
-        gathered = await asyncio.gather(
-            *(run_one(researcher) for researcher in candidates),
-            return_exceptions=True,
-        )
-        results: list[ParallelResearchResult] = []
-        for item in gathered:
-            if isinstance(item, ParallelResearchResult):
-                results.append(item)
-            elif isinstance(item, Exception):
-                results.append(ParallelResearchResult(
-                    text="",
-                    metadata={"source": "unknown", "timed_out": False},
-                    error=str(item),
-                ))
-        return results
-
-    @staticmethod
-    def merge_parallel_research_results(
-        results: list[ParallelResearchResult],
-    ) -> MergedResearchResult:
-        """确定性合并 researcher 结果，不调用 LLM。"""
-        successful_sections: list[str] = []
-        successful_sources: list[str] = []
-        timed_out_sources: list[str] = []
-        errored_sources: list[str] = []
-
-        for result in results:
-            source = str(result.metadata.get("source") or "unknown")
-            if result.metadata.get("timed_out"):
-                timed_out_sources.append(source)
-                continue
-            if result.error:
-                errored_sources.append(source)
-                continue
-
-            text = result.text.strip()
-            if text:
-                successful_sources.append(source)
-                successful_sections.append(f"### {source}\n{text}")
-
-        if successful_sections:
-            merged_text = "\n\n".join(successful_sections)
-        else:
-            merged_text = "没有可合并的 researcher 结果。"
-
-        status_lines: list[str] = []
-        if timed_out_sources:
-            status_lines.append("超时 researcher：" + ", ".join(timed_out_sources))
-        if errored_sources:
-            status_lines.append("异常 researcher：" + ", ".join(errored_sources))
-        if status_lines:
-            merged_text = merged_text + "\n\n---\n" + "\n".join(status_lines)
-
-        return MergedResearchResult(
-            text=merged_text,
-            successful_sources=successful_sources,
-            timed_out_sources=timed_out_sources,
-            errored_sources=errored_sources,
-        )
-
-    @staticmethod
-    def _build_agent_user_message(*, user_text: str, research_summary: str) -> str:
-        if not research_summary:
-            return user_text
-        return f"{user_text.rstrip()}\n\n{research_summary}"
-
-    @staticmethod
-    def _format_research_summary_for_agent(
-        *,
-        task: str,
-        merged: MergedResearchResult,
-        max_chars: int = 12_000,
-    ) -> str:
-        """格式化受限的只读发现结果，注入 main Agent 上下文。"""
-        summary = (
-            "[Parallel Research Summary]\n"
-            "这些是只读 researcher 在主 Agent 执行前得到的参考结论；"
-            "请结合项目实际情况判断，不要把它们当成已完成修改。\n\n"
-            f"原始任务：{task.strip()}\n\n"
-            f"成功来源：{', '.join(merged.successful_sources) or '(none)'}\n"
-            f"超时来源：{', '.join(merged.timed_out_sources) or '(none)'}\n"
-            f"异常来源：{', '.join(merged.errored_sources) or '(none)'}\n\n"
-            f"{merged.text.strip() or '没有可合并的 researcher 结果。'}"
-        )
-        if len(summary) <= max_chars:
-            return summary
-        return summary[:max_chars] + "\n... (parallel research summary truncated)"
-
-    async def _run_handoff_agent(
-        self,
-        *,
-        session: Session,
-        broadcast: Broadcast,
-        parent_agent_id: str,
-        agent_id: str,
-        task: str,
-        context: str = "",
-        staging: FileStagingArea,
-        permission_mgr: PermissionManager,
-    ) -> str:
-        """运行一个串行子 Agent，复用父 Agent 的写入安全边界。"""
-        agent_def = self._agent_store.get_agent(agent_id)
-        if not agent_def:
-            raise ValueError(f"Agent '{agent_id}' not found")
-        if agent_def.agent_id == parent_agent_id:
-            raise ValueError("An agent cannot delegate to itself")
-
-        agent_tools = resolve_tools([
-            name for name in agent_def.tools
-            if name != "delegate_agent"
-        ])
-        effective_model = self._resolve_model(agent_def)
-        effective_provider = agent_def.provider or self._config.provider
-        llm = self._create_llm_for_agent(agent_def, effective_model, effective_provider)
-
-        base_payload = {
-            "agent_id": agent_def.agent_id,
-            "agent_name": agent_def.name,
-            "role": agent_def.role,
-            "parent_agent_id": parent_agent_id,
-            "task": task,
-        }
-        await broadcast("handoff.started", base_payload)
-        await broadcast("agent.started", {
-            **base_payload,
-            "color": agent_def.color,
-            "delegated": True,
-            "handoff": True,
-        })
-
-        aid = agent_def.agent_id
-        aname = agent_def.name
-        arole = agent_def.role
-        acolor = agent_def.color
-        tool_call_ids: dict[str, list[str]] = {}
-
-        async def broadcast_tool_call(name: str, args: dict):
-            call_id = uuid4().hex[:8]
-            tool_call_ids.setdefault(name, []).append(call_id)
-            await broadcast("tool.call", {
-                "name": name,
-                "args": args,
-                "stage": "running",
-                "source": arole,
-                "call_id": call_id,
-                "agent_id": aid,
-                "parent_agent_id": parent_agent_id,
-            })
-
-        async def broadcast_tool_result(name: str, success: bool, result: str):
-            call_id = (
-                tool_call_ids.get(name, []).pop(0)
-                if tool_call_ids.get(name)
-                else uuid4().hex[:8]
-            )
-            await broadcast("tool.call", {
-                "name": name,
-                "args": {"result": result},
-                "stage": "completed",
-                "source": arole,
-                "call_id": call_id,
-                "success": success,
-                "agent_id": aid,
-                "parent_agent_id": parent_agent_id,
-            })
-
-        child_context = ToolContext(
-            session=session,
-            work_dir=session.work_dir,
-            staging=staging,
-            permission_mgr=permission_mgr,
-            delegate_runner=None,
-            broadcast=broadcast,
-            interrupt_check=lambda: session.interrupt_requested,
-        )
-
-        agent = Agent(
-            llm,
-            model=effective_model,
-            temperature=agent_def.temperature,
-            max_tool_rounds=agent_def.max_tool_rounds,
-            agent_id=aid,
-            role=arole,
-            agent_name=aname,
-        )
-        agent.tools = agent_tools
-        agent.system_prompt = (
-            agent_def.system_prompt
-            if agent_def.system_prompt
-            else self._build_handoff_system_prompt(session, agent_def)
-        )
-
-        handoff_message = (
-            f"[Handoff task from {parent_agent_id}]\n{task.strip()}\n\n"
-            f"[Context]\n{context.strip() or '(none)'}\n\n"
-            "Work only on this delegated task. File edits must go through the provided tools. "
-            "Do not delegate further."
-        )
-
-        try:
-            result = await agent.run(
-                user_message=handoff_message,
-                tool_context=child_context,
-                existing_messages=None,
-                max_tool_rounds=agent_def.max_tool_rounds,
-                on_text=lambda t: broadcast("agent.text", {
-                    "text": t,
-                    "source": arole,
-                    "is_final": False,
-                    "agent_id": aid,
-                    "agent_name": aname,
-                    "role": arole,
-                    "color": acolor,
-                    "parent_agent_id": parent_agent_id,
-                }),
-                on_thinking=lambda t: broadcast("agent.thinking", {
-                    "text": t,
-                    "source": arole,
-                    "agent_id": aid,
-                    "agent_name": aname,
-                    "parent_agent_id": parent_agent_id,
-                }),
-                on_tool_call=broadcast_tool_call,
-                on_tool_result=broadcast_tool_result,
-            )
-        except Exception as exc:
-            await broadcast("handoff.failed", {
-                **base_payload,
-                "error": str(exc),
-            })
-            raise
-
-        session.usage_total += result.usage
-        await broadcast("agent.completed", {
-            "agent_id": aid,
-            "agent_name": aname,
-            "role": arole,
-            "summary": result.text[:200] if result.text else "",
-            "usage": {
-                "input_tokens": result.usage.input_tokens,
-                "output_tokens": result.usage.output_tokens,
-            },
-            "parent_agent_id": parent_agent_id,
-            "delegated": True,
-            "handoff": True,
-        })
-        await broadcast("handoff.completed", {
-            **base_payload,
-            "text": result.text,
-        })
-        await broadcast("agent.text", {
-            "text": "",
-            "source": arole,
-            "is_final": True,
-            "agent_id": aid,
-            "agent_name": aname,
-            "parent_agent_id": parent_agent_id,
-        })
-
-        return self._format_delegate_result(agent_def, result)
-
-    async def _run_delegated_agent(
-        self,
-        *,
-        session: Session,
-        broadcast: Broadcast,
-        parent_agent_id: str,
-        agent_id: str,
-        task: str,
-        context: str = "",
-    ) -> str:
-        """运行一个委派子 Agent，并返回紧凑摘要。
-
-        第一版刻意保持只读：即使 Agent 定义里包含更多权限，委派 Agent
-        也只会拿到读文件、搜索和列目录工具。这样在明确 handoff 与冲突处理
-        机制前，可以避免并发写入冲突。
-        """
-        agent_def = self._agent_store.get_agent(agent_id)
-        if not agent_def:
-            raise ValueError(f"Agent '{agent_id}' not found")
-        if agent_def.agent_id == parent_agent_id:
-            raise ValueError("An agent cannot delegate to itself")
-
-        allowed_tools = [
-            "read_file",
-            "grep_search",
-            "find_files",
-            "list_directory",
-        ]
-        agent_tools = resolve_tools([
-            name for name in agent_def.tools
-            if name in allowed_tools
-        ])
-        if not agent_tools:
-            agent_tools = resolve_tools(allowed_tools)
-
-        effective_model = self._resolve_model(agent_def)
-        effective_provider = agent_def.provider or self._config.provider
-        llm = self._create_llm_for_agent(agent_def, effective_model, effective_provider)
-
-        await broadcast("agent.started", {
-            "agent_id": agent_def.agent_id,
-            "agent_name": agent_def.name,
-            "role": agent_def.role,
-            "color": agent_def.color,
-            "parent_agent_id": parent_agent_id,
-            "delegated": True,
-        })
-
-        aid = agent_def.agent_id
-        aname = agent_def.name
-        arole = agent_def.role
-        acolor = agent_def.color
-        tool_call_ids: dict[str, list[str]] = {}
-
-        async def broadcast_tool_call(name: str, args: dict):
-            call_id = uuid4().hex[:8]
-            tool_call_ids.setdefault(name, []).append(call_id)
-            await broadcast("tool.call", {
-                "name": name,
-                "args": args,
-                "stage": "running",
-                "source": arole,
-                "call_id": call_id,
-                "agent_id": aid,
-                "parent_agent_id": parent_agent_id,
-            })
-
-        async def broadcast_tool_result(name: str, success: bool, result: str):
-            call_id = (
-                tool_call_ids.get(name, []).pop(0)
-                if tool_call_ids.get(name)
-                else uuid4().hex[:8]
-            )
-            await broadcast("tool.call", {
-                "name": name,
-                "args": {"result": result},
-                "stage": "completed",
-                "source": arole,
-                "call_id": call_id,
-                "success": success,
-                "agent_id": aid,
-                "parent_agent_id": parent_agent_id,
-            })
-
-        child_context = ToolContext(
-            session=session,
-            work_dir=session.work_dir,
-            staging=None,
-            permission_mgr=None,
-            delegate_runner=None,
-            broadcast=broadcast,
-            interrupt_check=lambda: session.interrupt_requested,
-        )
-
-        agent = Agent(
-            llm,
-            model=effective_model,
-            temperature=agent_def.temperature,
-            max_tool_rounds=agent_def.max_tool_rounds,
-            agent_id=aid,
-            role=arole,
-            agent_name=aname,
-        )
-        agent.tools = agent_tools
-        agent.system_prompt = (
-            agent_def.system_prompt
-            if agent_def.system_prompt
-            else self._build_delegated_system_prompt(session, agent_def)
-        )
-
-        delegated_message = (
-            f"[Delegated task from {parent_agent_id}]\n{task.strip()}\n\n"
-            f"[Context]\n{context.strip() or '(none)'}\n\n"
-            "Return concise findings, cite relevant files when possible, and do not modify files."
-        )
-
-        result = await agent.run(
-            user_message=delegated_message,
-            tool_context=child_context,
-            existing_messages=None,
-            max_tool_rounds=agent_def.max_tool_rounds,
-            on_text=lambda t: broadcast("agent.text", {
-                "text": t,
-                "source": arole,
-                "is_final": False,
-                "agent_id": aid,
-                "agent_name": aname,
-                "role": arole,
-                "color": acolor,
-                "parent_agent_id": parent_agent_id,
-            }),
-            on_thinking=lambda t: broadcast("agent.thinking", {
-                "text": t,
-                "source": arole,
-                "agent_id": aid,
-                "agent_name": aname,
-                "parent_agent_id": parent_agent_id,
-            }),
-            on_tool_call=broadcast_tool_call,
-            on_tool_result=broadcast_tool_result,
-        )
-
-        session.usage_total += result.usage
-        await broadcast("agent.completed", {
-            "agent_id": aid,
-            "agent_name": aname,
-            "role": arole,
-            "summary": result.text[:200] if result.text else "",
-            "usage": {
-                "input_tokens": result.usage.input_tokens,
-                "output_tokens": result.usage.output_tokens,
-            },
-            "parent_agent_id": parent_agent_id,
-            "delegated": True,
-        })
-
-        await broadcast("agent.text", {
-            "text": "",
-            "source": arole,
-            "is_final": True,
-            "agent_id": aid,
-            "agent_name": aname,
-            "parent_agent_id": parent_agent_id,
-        })
-
-        return self._format_delegate_result(agent_def, result)
+    # ─── 便捷方法 ───
 
     def _resolve_agent(self, agent_id: str) -> AgentDefinition | None:
         return self._agent_store.get_agent(agent_id) or self._agent_store.get_agent("main")
-
-    # ─── Tool classification (delegated to tools module) ───
 
     @classmethod
     def _is_read_only_agent(cls, agent_def: AgentDefinition) -> bool:
@@ -928,216 +364,3 @@ class AgentOrchestrator:
     def _has_write_tools(cls, agent_def: AgentDefinition) -> bool:
         """Agent 拥有任意写/shell 工具则有写能力。"""
         return has_write_tool(agent_def.tools)
-
-    def _should_run_parallel_research(
-        self,
-        session: Session,
-        agent_def: AgentDefinition,
-    ) -> bool:
-        """判断当前用户消息是否应触发只读并行研究。
-
-        按工具权限判断而非角色名：只要存在其他只读 Agent 可作为
-        researcher 候选，就触发并行研究。
-        """
-        if session.solo_mode:
-            return False
-        return any(
-            self._is_read_only_agent(candidate) and candidate.agent_id != agent_def.agent_id
-            for candidate in self._agent_store.list_agents()
-        )
-
-    def _resolve_model(self, agent_def: AgentDefinition) -> str:
-        """解析 Agent 的有效模型。
-
-        优先级：agent_def.model → 全局角色回退值 → main_model。
-        角色回退值（research_model, coder_model）仅为便利默认值——
-        任何自定义角色有自己的 model 字段时优先使用。
-        """
-        if agent_def.model:
-            return agent_def.model
-        if agent_def.role == "researcher" and self._config.research_model:
-            return self._config.research_model
-        if agent_def.role == "coder" and self._config.coder_model:
-            return self._config.coder_model
-        return self._config.main_model
-
-    def _create_llm_for_agent(
-        self,
-        agent_def: AgentDefinition,
-        effective_model: str,
-        effective_provider: str,
-    ) -> LLMClient:
-        if agent_def.provider or agent_def.model or effective_model != self._config.main_model:
-            return LLMClient(
-                provider=effective_provider,
-                api_key=self._config.api_key,
-                base_url=self._config.base_url,
-                model=effective_model,
-            )
-        return self._llm
-
-    @staticmethod
-    def _format_delegate_result(agent_def: AgentDefinition, result: AgentResult) -> str:
-        text = (result.text or "").strip()
-        if len(text) > 12_000:
-            text = text[:12_000] + "\n... (delegated result truncated)"
-        return (
-            f"Delegated agent '{agent_def.name}' ({agent_def.agent_id}, role={agent_def.role}) "
-            f"completed.\n\n{text or '(no textual result)'}"
-        )
-
-    @staticmethod
-    def _should_generate_title(session: Session) -> bool:
-        """只替换占位标题，不替换项目/用户提供的名称。"""
-        import re
-
-        title = (session.title or "").strip()
-        return not title or bool(re.fullmatch(r"Session \d{2}:\d{2}", title))
-
-    @staticmethod
-    def _generate_session_title(text: str, work_dir) -> str:
-        """从第一条用户消息生成简短的确定性标题。
-
-        This is the instant fallback used before the async LLM title update
-        completes (or when the LLM call fails).
-        """
-        import re
-
-        cleaned = re.sub(r"[`*_#>\[\](){}]", "", text).strip()
-        cleaned = re.sub(r"\s+", " ", cleaned)
-        cleaned = re.sub(r"^(?:(?:请|帮我|麻烦|能不能|可以)\s*)+", "", cleaned)
-        if not cleaned:
-            cleaned = work_dir.name or "新会话"
-        if len(cleaned) > 24:
-            cleaned = cleaned[:24].rstrip() + "…"
-        return cleaned
-
-    async def _update_title_with_llm(
-        self,
-        *,
-        session: Session,
-        user_text: str,
-        broadcast: Broadcast,
-    ) -> None:
-        """异步通过 LLM 生成语义会话标题。
-
-        Uses the main LLM client (no dedicated title model). Falls back to
-        the algorithmic title on any error. Broadcasts ``session.title.updated``
-        so the frontend can refresh the sidebar without a full reload.
-        """
-        try:
-            title = await self._call_llm_for_title(user_text)
-            title = (title or "").strip().strip('"\'""''')
-            if not title:
-                return
-            if len(title) > 48:
-                title = title[:48].rstrip() + "…"
-            session.title = title
-            if self._session_store:
-                self._session_store.save(session)
-            await broadcast("session.title.updated", {
-                "session_id": session.id,
-                "title": title,
-            })
-        except Exception:
-            logger.debug("LLM title generation failed, keeping fallback", exc_info=True)
-
-    async def _call_llm_for_title(self, user_text: str) -> str:
-        """调用轻量 LLM 生成简洁的会话标题。
-
-        Uses ``title_model`` if configured (can be a cheap/small model),
-        otherwise falls back to the main model. Returns the raw title
-        string; caller handles cleanup and fallback.
-        """
-        title_model = self._config.effective_title_model
-        if self._config.title_model:
-            llm = LLMClient(
-                provider=self._config.provider,
-                api_key=self._config.api_key,
-                base_url=self._config.base_url,
-                model=title_model,
-            )
-        else:
-            llm = self._llm
-
-        system_prompt = (
-            "你是一个会话标题生成器。根据用户的第一条消息，生成一个简洁的中文会话标题。"
-            "要求：不超过 20 个字，不要引号，不要句号，概括用户意图。"
-            "只返回标题文本，不要任何解释或前缀。"
-        )
-        title = ""
-        async for event in llm.chat(
-            messages=[{"role": "user", "content": user_text[:2000]}],
-            system=system_prompt,
-            model=title_model,
-            max_tokens=64,
-            temperature=0.3,
-            stream=True,
-        ):
-            if event.text_delta:
-                title += event.text_delta
-            if event.finish:
-                break
-        return title
-
-    @staticmethod
-    def _build_system_prompt(session: Session) -> str:
-        """构建 main Agent 的默认系统提示词。"""
-        return f"""你是一个乐于助人的编程助手，帮助用户完成软件开发任务。
-
-你可以使用以下工具：
-- read_file: 读取文件内容（带行号）
-- write_file: 创建或覆盖文件
-- edit_file: 在文件中搜索并替换文本
-- run_console: 执行 shell 命令
-- grep_search: 使用正则搜索文件内容
-- find_files: 按名称模式查找文件
-- list_directory: 以树形结构列出目录内容
-
-工作目录：{session.work_dir}
-
-行为准则：
-- 修改文件前先读取，了解上下文
-- 小改动使用 edit_file（保留周围代码）
-- 仅在创建新文件或完全重写时使用 write_file
-- 修改后尽可能运行测试验证
-- 修改前先解释你的思路
-- 不确定项目结构时，先用 list_directory 和 grep_search 探索
-"""
-
-    @staticmethod
-    def _build_delegated_system_prompt(session: Session, agent_def: AgentDefinition) -> str:
-        """构建只读委派 Agent 的默认提示词。"""
-        return f"""你是 {agent_def.name}，一个只读的委派编程助手。
-
-你的职责是为其他 Agent 调研聚焦的子任务。你可以使用读/搜索/列表工具检查本地项目，
-但不能修改文件、执行 shell 命令，或做与任务无关的广泛操作。
-
-工作目录：{session.work_dir}
-
-行为准则：
-- 严格聚焦在委派任务上。
-- 尽可能引用相关文件和符号。
-- 偏好简洁的发现而非冗长的解释。
-- 明确说明不确定性和缺失信息。
-- 不要尝试编辑文件或执行命令。
-"""
-
-    @staticmethod
-    def _build_handoff_system_prompt(session: Session, agent_def: AgentDefinition) -> str:
-        """构建串行 handoff Agent 的默认提示词。"""
-        return f"""你是 {agent_def.name}，一个委派的 {agent_def.role} Agent。
-
-你的职责是为父 Agent 完成一个聚焦的 handoff 任务。
-你可以使用角色分配的工具，但所有文件变更必须通过工具/staging 边界，
-shell 命令必须遵守配置的审批规则。不要将工作委派给其他 Agent。
-
-工作目录：{session.work_dir}
-
-行为准则：
-- 严格在委派任务和给定上下文中工作。
-- 偏好小的、可审查的文件变更。
-- 编辑前先读取相关文件。
-- 仅在有用时运行聚焦的验证命令。
-- 总结所做的变更、验证的内容以及任何残留风险。
-"""
