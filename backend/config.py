@@ -19,8 +19,8 @@ class AppConfig:
     # ─── LLM ───
     provider: str = "openai"          # "openai" | "anthropic" | "gemini"
     api_key: str = ""
-    base_url: str = "https://api.deepseek.com/v1"
-    main_model: str = "deepseek-v3"
+    base_url: str = "https://api.deepseek.com"
+    main_model: str = "deepseek-v4-flash"
     coder_model: str | None = None    # None = same as main
     research_model: str | None = None # None = same as main
     title_model: str | None = None    # None = same as main

@@ -40,7 +40,7 @@ const PROVIDERS = [
 ];
 
 const PRESETS = [
-  { name: 'DeepSeek', url: 'https://api.deepseek.com/v1' },
+  { name: 'DeepSeek', url: 'https://api.deepseek.com' },
   { name: '通义千问', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
   { name: 'GLM', url: 'https://open.bigmodel.cn/api/paas/v4' },
   { name: 'Kimi', url: 'https://api.moonshot.cn/v1' },

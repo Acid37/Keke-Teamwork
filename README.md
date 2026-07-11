@@ -147,8 +147,8 @@ start.bat
 
 ```text
 Provider: openai
-Base URL: https://api.deepseek.com/v1
-Model: deepseek-v3
+Base URL: https://api.deepseek.com
+Model: deepseek-v4-flash
 ```
 
 也可以通过环境变量覆盖配置：
