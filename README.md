@@ -242,4 +242,4 @@ CT_CONSOLE_TIMEOUT
 
 ## 许可证
 
-当前仓库尚未声明许可证。发布或开源前建议补充明确的 LICENSE 文件。
+本仓库采用 **MIT License**，详见 `LICENSE`。

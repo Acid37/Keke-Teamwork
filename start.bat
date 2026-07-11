@@ -71,7 +71,7 @@ echo  按 Ctrl+C 停止服务
 echo.
 
 REM ── 后台等待端口就绪后打开浏览器 ──
-start /b cmd /c "timeout /t 2 /nobreak >nul & for /l %%i in (1,1,30) do (timeout /t 1 /nobreak >nul & netstat -aon 2^>nul ^| find ":8765" ^| find "LISTENING" >nul && (start http://127.0.0.1:8765/ & exit /b))"
+start /b powershell -NoProfile -WindowStyle Hidden -Command "$ready = $false; for ($i = 0; $i -lt 30; $i++) { if (Test-NetConnection 127.0.0.1 -Port 8765 -InformationLevel Quiet) { Start-Process 'http://127.0.0.1:8765/'; $ready = $true; break }; Start-Sleep -Seconds 1 }; if (-not $ready) { Write-Host '浏览器自动打开失败：端口 8765 未在等待时间内就绪。' }"
 
 REM ── 前台运行后端，关闭此窗口即停止服务 ──
 set CT_RELOAD=0
