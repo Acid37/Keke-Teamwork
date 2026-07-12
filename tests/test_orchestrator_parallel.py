@@ -339,7 +339,11 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
             main = make_agent("main", role="assistant")
             researcher = make_agent("researcher")
             orchestrator = AgentOrchestrator(
-                config=AppConfig(max_parallel_researchers=1),
+                config=AppConfig(
+                    max_parallel_researchers=1,
+                    api_key="sk-test",
+                    base_url="https://api.openai.com",
+                ),
                 llm=object(),
                 agent_store=FakeStore([main, researcher]),
                 permission_managers={},
@@ -380,7 +384,11 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
             main = make_agent("main", role="assistant")
             researcher = make_agent("researcher")
             orchestrator = AgentOrchestrator(
-                config=AppConfig(max_parallel_researchers=1),
+                config=AppConfig(
+                    max_parallel_researchers=1,
+                    api_key="sk-test",
+                    base_url="https://api.openai.com",
+                ),
                 llm=object(),
                 agent_store=FakeStore([main, researcher]),
                 permission_managers={},

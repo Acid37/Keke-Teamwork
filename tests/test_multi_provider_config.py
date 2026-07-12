@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import patch
 
 from backend.config import APIProvider, AppConfig, ModelInfo
 
@@ -159,13 +160,9 @@ class AppConfigMultiProviderTests(TestCase):
         self.assertIn("****", d["providers"][0]["api_key_masked"])
 
     def test_save_load_roundtrip(self) -> None:
-        import os
         with TemporaryDirectory() as tmp:
             home = Path(tmp)
-            # 把 Path.home() 临时指向 tmp
-            original_home = os.environ.get("USERPROFILE")
-            os.environ["USERPROFILE"] = str(home)
-            try:
+            with patch("pathlib.Path.home", return_value=home):
                 cfg = AppConfig()
                 cfg.providers = [
                     APIProvider(name="p1", client_type="openai", base_url="https://a", api_key="k1", enabled=True),
@@ -189,15 +186,9 @@ class AppConfigMultiProviderTests(TestCase):
                 self.assertEqual(loaded.models[0].model_id, "gpt-4")
                 self.assertEqual(loaded.models[0].max_context, 128000)
                 self.assertEqual(loaded.main_model, "m1")
-            finally:
-                if original_home is None:
-                    os.environ.pop("USERPROFILE", None)
-                else:
-                    os.environ["USERPROFILE"] = original_home
 
     def test_load_handles_missing_providers_field(self) -> None:
         """旧格式 config.json 没有 providers/models 字段时，迁移能正常进行。"""
-        import os
         with TemporaryDirectory() as tmp:
             home = Path(tmp)
             data_dir = home / ".keke-teamwork"
@@ -208,9 +199,7 @@ class AppConfigMultiProviderTests(TestCase):
                 "base_url": "https://api.deepseek.com",
                 "main_model": "deepseek-chat",
             }, ensure_ascii=False), encoding="utf-8")
-            original_home = os.environ.get("USERPROFILE")
-            os.environ["USERPROFILE"] = str(home)
-            try:
+            with patch("pathlib.Path.home", return_value=home):
                 cfg = AppConfig._load_from_file()
                 self.assertEqual(cfg.provider, "openai")
                 self.assertEqual(cfg.api_key, "sk-legacy")
@@ -221,8 +210,3 @@ class AppConfigMultiProviderTests(TestCase):
                 self.assertEqual(cfg.providers[0].api_key, "sk-legacy")
                 self.assertEqual(len(cfg.models), 1)
                 self.assertEqual(cfg.models[0].model_id, "deepseek-chat")
-            finally:
-                if original_home is None:
-                    os.environ.pop("USERPROFILE", None)
-                else:
-                    os.environ["USERPROFILE"] = original_home
