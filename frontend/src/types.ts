@@ -9,6 +9,7 @@ export interface AgentDefinition {
   temperature: number;
   tools: string[];
   max_tool_rounds: number;
+  max_context: number | null;
   color: string;
   description: string;
 }

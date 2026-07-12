@@ -122,8 +122,6 @@ class DelegateAgentTests(IsolatedAsyncioTestCase):
             config.api_key = "test-key"
             config.base_url = "https://example.invalid/v1"
             config.main_model = "shared-model"
-            config.research_model = "shared-model"
-            config.coder_model = "shared-model"
             store = FakeStore(researcher)
             broadcast = FakeBroadcast()
 
@@ -151,6 +149,7 @@ class DelegateAgentTests(IsolatedAsyncioTestCase):
                     tool_context: ToolContext,
                     existing_messages,
                     max_tool_rounds: int,
+                    context_limit: int = 100_000,
                     on_text,
                     on_thinking,
                     on_tool_call,
@@ -249,7 +248,6 @@ class DelegateAgentTests(IsolatedAsyncioTestCase):
             config.api_key = "test-key"
             config.base_url = "https://example.invalid/v1"
             config.main_model = "shared-model"
-            config.coder_model = "shared-model"
             broadcast = FakeBroadcast()
             staging = FileStagingArea(work_dir)
             permission_mgr = PermissionManager(broadcast=broadcast, yolo_mode=True)
@@ -275,6 +273,7 @@ class DelegateAgentTests(IsolatedAsyncioTestCase):
                     tool_context: ToolContext,
                     existing_messages,
                     max_tool_rounds: int,
+                    context_limit: int = 100_000,
                     on_text,
                     on_thinking,
                     on_tool_call,
@@ -367,7 +366,6 @@ class DelegateAgentTests(IsolatedAsyncioTestCase):
             config.api_key = "test-key"
             config.base_url = "https://example.invalid/v1"
             config.main_model = "shared-model"
-            config.coder_model = "shared-model"
             session = Session(id="session-flow-handoff", work_dir=work_dir, solo_mode=False)
             broadcast = FakeBroadcast()
 
@@ -387,6 +385,7 @@ class DelegateAgentTests(IsolatedAsyncioTestCase):
                     tool_context: ToolContext,
                     existing_messages,
                     max_tool_rounds: int,
+                    context_limit: int = 100_000,
                     on_text,
                     on_thinking,
                     on_tool_call,

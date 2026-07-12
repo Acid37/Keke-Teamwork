@@ -79,21 +79,17 @@ class AppConfigMultiProviderTests(TestCase):
         self.assertEqual(cfg.models[0].provider_name, cfg.providers[0].name)
         self.assertEqual(cfg.main_model, "main")
 
-    def test_migrate_legacy_preserves_coder_researcher_title(self) -> None:
+    def test_migrate_legacy_preserves_title_only(self) -> None:
         cfg = AppConfig(
             provider="openai",
             api_key="sk",
             base_url="https://api.deepseek.com",
             main_model="deepseek-chat",
-            coder_model="deepseek-coder",
-            research_model="deepseek-reasoner",
             title_model="deepseek-chat",
         )
         cfg._migrate_legacy()
         names = {m.name for m in cfg.models}
         self.assertIn("main", names)
-        self.assertIn("coder", names)
-        self.assertIn("researcher", names)
         # title_model 和 main_model 相同，不会重复创建
         self.assertEqual(len([m for m in cfg.models if m.model_id == "deepseek-chat"]), 1)
         # 但 main_model 引用别名
@@ -132,32 +128,23 @@ class AppConfigMultiProviderTests(TestCase):
         self.assertEqual(cfg.get_model("m1").model_id, "gpt-4")
         self.assertIsNone(cfg.get_model("nope"))
 
-    def test_get_model_for_role(self) -> None:
-        cfg = AppConfig(main_model="main", coder_model="coder", research_model="r", title_model=None)
+    def test_get_main_and_title_model(self) -> None:
+        cfg = AppConfig(main_model="main", title_model=None)
         cfg.providers = [APIProvider(name="p", client_type="openai", base_url="https://a", api_key="k")]
         cfg.models = [
             ModelInfo(name="main", model_id="gpt-4", provider_name="p"),
-            ModelInfo(name="coder", model_id="codex", provider_name="p"),
-            ModelInfo(name="r", model_id="reasoner", provider_name="p"),
         ]
-        self.assertEqual(cfg.get_model_for_role("main").model_id, "gpt-4")
-        self.assertEqual(cfg.get_model_for_role("coder").model_id, "codex")
-        self.assertEqual(cfg.get_model_for_role("researcher").model_id, "reasoner")
-        # title 没设置时回退到 main
-        self.assertEqual(cfg.get_model_for_role("title").model_id, "gpt-4")
-        # 未知角色回退到 main
-        self.assertEqual(cfg.get_model_for_role("custom").model_id, "gpt-4")
+        self.assertEqual(cfg.get_main_model().model_id, "gpt-4")
+        self.assertEqual(cfg.get_title_model().model_id, "gpt-4")
 
-    def test_effective_coder_research_title_resolve_alias(self) -> None:
-        cfg = AppConfig(main_model="main", coder_model="coder")
+    def test_effective_title_resolve_alias(self) -> None:
+        cfg = AppConfig(main_model="main", title_model="title")
         cfg.providers = [APIProvider(name="p", client_type="openai", base_url="https://a", api_key="k")]
         cfg.models = [
             ModelInfo(name="main", model_id="gpt-4", provider_name="p"),
-            ModelInfo(name="coder", model_id="codex", provider_name="p"),
+            ModelInfo(name="title", model_id="cheap-title", provider_name="p"),
         ]
-        self.assertEqual(cfg.effective_coder_model, "codex")
-        self.assertEqual(cfg.effective_research_model, "gpt-4")
-        self.assertEqual(cfg.effective_title_model, "gpt-4")
+        self.assertEqual(cfg.effective_title_model, "cheap-title")
 
     def test_to_dict_includes_providers_and_models(self) -> None:
         cfg = AppConfig()
@@ -189,7 +176,6 @@ class AppConfigMultiProviderTests(TestCase):
                     ModelInfo(name="m2", model_id="claude", provider_name="p2"),
                 ]
                 cfg.main_model = "m1"
-                cfg.coder_model = "m2"
                 cfg.save()
 
                 # 读回（不要迁移，因为文件已经包含新结构）
@@ -203,7 +189,6 @@ class AppConfigMultiProviderTests(TestCase):
                 self.assertEqual(loaded.models[0].model_id, "gpt-4")
                 self.assertEqual(loaded.models[0].max_context, 128000)
                 self.assertEqual(loaded.main_model, "m1")
-                self.assertEqual(loaded.coder_model, "m2")
             finally:
                 if original_home is None:
                     os.environ.pop("USERPROFILE", None)

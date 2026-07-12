@@ -104,14 +104,13 @@ class LLMClientFactory:
     def get_client(self, model_alias: str | None) -> LLMClient:
         """按 model 别名返回对应的 LLMClient。
 
-        未指定别名或找不到时，回退到 main_model 角色对应的模型。
+        未指定别名或找不到时，回退到 main_model 对应的模型。
         """
-        role = model_alias if model_alias in ("coder", "researcher", "title") else None
-        model_info = self._config.get_model_for_role(role or "main")
-        if model_info is None and model_alias and role is None:
+        model_info = None
+        if model_alias:
             model_info = self._config.get_model(model_alias)
         if model_info is None:
-            model_info = self._config.get_model_for_role("main")
+            model_info = self._config.get_main_model()
         if model_info is None and self._config.providers:
             # 兜底：第一个 provider + alias 当 model_id
             class _FallbackModel:

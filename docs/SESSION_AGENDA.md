@@ -30,11 +30,12 @@
 - [x] 会话创建保护（无项目时禁用新建会话）。
 
 ### 阶段 1：角色真正自定义（已完成）
-- [x] 去掉 `_resolve_model` 角色硬编码，所有角色统一走 `agent_def.model → 角色回退 → main_model`。
+- [x] 去掉模型解析角色硬编码，所有 Agent 统一走 `agent_def.model → main_model`。
 - [x] 前端 Agent 管理已支持 per-agent 模型选择。
 - [x] Agent 分流从角色名判断改为工具权限判断。
-- [x] 全局配置里的 `coder_model`/`research_model`/`title_model` 降级为"默认回退值"文档说明。
-- [x] 默认 Agent 定义扩展到 5 个示例（main/researcher/coder/reviewer/doc_writer）。
+- [x] `role` 字段降级为纯标签，不触发运行时特殊行为。
+- [x] 默认 Agent 定义精简为仅保留 `main`，用户按需自定义角色。
+- [x] `coder_model`/`research_model` 已移除；仅保留 `title_model` 用于标题生成服务。
 
 ### 阶段 2：工具可插拔（已完成）
 - [x] 工具注册改为分类注册（`coding`/`search`/`file`/`shell`/`mcp`）。
@@ -54,21 +55,27 @@
 - [x] 后端关键模块 docstring 改中文。
 - [x] 新增 `AI开发文档.md`，README 精简为用户视角。
 - [x] 修复 6 处测试断言匹配新的中文消息。
+- [x] README 与待办文案收敛为“自定义 Agent / 默认模型 / 标题模型”，移除角色映射表述。
 
 ## 下一步
 
-### 阶段 5：orchestrator.py 重构（高优先级）
-**问题**：当前 `orchestrator.py` 1100+ 行，承担 7+ 个职责。
+### 阶段 5：orchestrator.py 重构（已完成）
+- [x] `orchestrator.py` — 371 → 247 行，提取 `_run_parallel_research` / `_build_tool_context` / `_create_agent` / `_finalize_success`
+- [x] `delegate_runner.py` — 398 → 202 行，提取 `_validate` / `_run_child` 消除 delegate/handoff 重复
+- [x] `research_runner.py` — 299 行（已达标）
+- [x] `title_service.py` — 121 行（已达标）
+- [x] `prompt_builder.py` — 108 行（已达标，含 project_context 注入）
+- [x] `model_resolver.py` — 120 行（已达标，含 `resolve_context_limit`）
 
-计划拆分：
-- `orchestrator.py` — 只做消息分发，< 200 行
-- `research_runner.py` — 并行研究 + 合并，~250 行
-- `delegate_runner.py` — 合并 `_run_handoff_agent` / `_run_delegated_agent` 消除重复，~300 行
-- `title_service.py` — 标题生成，~120 行
-- `prompt_builder.py` — 三个系统提示词，~80 行
-- `model_resolver.py` — 模型解析 + LLM 客户端创建，~50 行
-
-**目标**：消除 ~300 行重复代码，每个模块 < 300 行。
+### 上下文治理（已完成）
+- [x] 连通 `context_limit` 配置链路：`AgentDefinition.max_context` → `ModelInfo.max_context` → 默认 100k
+- [x] `AgentDefinition` 新增 `max_context` 字段，支持 per-agent 覆盖
+- [x] 所有 `agent.run()` 调用点传入 `context_limit`（orchestrator / delegate_runner）
+- [x] 激活 `project_context`：新增 `context_builder.py`，首次消息时扫描项目结构
+- [x] 三个系统提示词注入 project_context 摘要（main 全量，delegated/handoff 精简）
+- [x] 压缩提示词中文化
+- [x] Token 估算改进：CJK 1:1，ASCII 4:1（替代 chars//3）
+- [x] 新增 23 个测试（context_limit 7 + project_context 8 + token_estimate 8），总计 125 个
 
 ### 阶段 4 剩余
 - [ ] per-agent 工具权限策略（参考 MoFox 的 `PermissionLevel`）。
@@ -101,3 +108,19 @@
 - 全部提示词、工具描述、错误消息、关键 docstring 改为中文
 - 新增 47 个安全分层测试（总计 87 个）
 - 文档：SESSION_AGENDA、ROADMAP、AI开发文档
+
+## 本次提交记录（2026-07-12 #2）
+
+上下文治理 + 阶段 5 重构收尾
+- **连通 context_limit**：`ModelResolver.resolve_context_limit()`，优先级 `AgentDefinition.max_context` → `ModelInfo.max_context` → 默认 100k
+- **激活 project_context**：新增 `context_builder.py`，首次消息时扫描项目语言/框架/目录结构，注入三个系统提示词
+- **改进压缩质量**：压缩提示词中文化，token 估算改为 CJK 1:1 + ASCII 4:1
+- **orchestrator.py 瘦身**：371 → 247 行，提取 5 个私有方法
+- **delegate_runner.py 瘦身**：398 → 202 行，提取 `_validate` / `_run_child` 消除 delegate/handoff 重复
+- 新增 23 个测试（总计 125 个）
+
+## 本次提交记录（2026-07-12 #3）
+
+README 与待办文案收尾
+- README 去掉“预设角色 / 角色映射”表述，统一改为“自定义 Agent / 默认模型 / 标题模型”
+- 待办说明补充当前真实状态，避免再暗示 coder/researcher 之类的默认角色

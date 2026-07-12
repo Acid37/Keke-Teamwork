@@ -8,8 +8,6 @@ interface ModelSettingsProps {
     providers: APIProvider[];
     models: ModelInfo[];
     main_model: string;
-    coder_model: string | null;
-    research_model: string | null;
     title_model: string | null;
   };
   /** 触发整体重载（保存后由父组件调用）*/
@@ -216,9 +214,9 @@ export function ModelSettings({ config, onConfigChange, onMessage }: ModelSettin
     }
   }
 
-  // ─── 角色映射 ───
+  // ─── 模型用途配置 ───
 
-  async function handleRoleChange(role: 'main_model' | 'coder_model' | 'research_model' | 'title_model', alias: string) {
+  async function handleModelSettingChange(role: 'main_model' | 'title_model', alias: string) {
     const body = { [role]: alias || null };
     setBusy(true);
     try {
@@ -412,6 +410,16 @@ export function ModelSettings({ config, onConfigChange, onMessage }: ModelSettin
                 </button>
               </div>
             </div>
+            <div className="form-row">
+              <label>上下文窗口 <span className="optional">（可选，如 128000）</span></label>
+              <input
+                type="number"
+                min="0"
+                value={modelDraft.max_context ?? ''}
+                onChange={e => setModelDraft({ ...modelDraft, max_context: e.target.value === '' ? null : parseInt(e.target.value) || null })}
+                placeholder="留空则使用默认 100000"
+              />
+            </div>
             <div className="form-actions">
               <button className="btn-secondary" onClick={() => setModelDraft(null)}>取消</button>
               <button className="btn-primary" onClick={handleAddModel} disabled={busy}>
@@ -430,55 +438,19 @@ export function ModelSettings({ config, onConfigChange, onMessage }: ModelSettin
               key={m.name}
               model={m}
               providers={config.providers}
+              isDefault={config.main_model === m.name}
+              isTitle={config.title_model === m.name}
               isEditing={editingModelName === m.name}
               onEdit={() => setEditingModelName(m.name)}
               onCancelEdit={() => setEditingModelName(null)}
               onSave={(body) => handleUpdateModel(m.name, body)}
               onDelete={() => handleDeleteModel(m.name)}
+              onSetDefault={() => handleModelSettingChange('main_model', m.name)}
+              onSetTitle={() => handleModelSettingChange('title_model', m.name)}
               onFetchModels={fetchModelsFor}
               busy={busy}
             />
           ))}
-        </div>
-      </section>
-
-      {/* ─── 角色映射 ─── */}
-      <section className="settings-section">
-        <div className="section-header">
-          <h3>角色映射</h3>
-        </div>
-        <div className="role-mapping">
-          <RoleSelector
-            label="主模型"
-            value={config.main_model}
-            models={config.models}
-            onChange={(v) => handleRoleChange('main_model', v)}
-            disabled={busy}
-          />
-          <RoleSelector
-            label="编码模型"
-            value={config.coder_model}
-            models={config.models}
-            onChange={(v) => handleRoleChange('coder_model', v)}
-            allowNone
-            disabled={busy}
-          />
-          <RoleSelector
-            label="研究模型"
-            value={config.research_model}
-            models={config.models}
-            onChange={(v) => handleRoleChange('research_model', v)}
-            allowNone
-            disabled={busy}
-          />
-          <RoleSelector
-            label="标题模型"
-            value={config.title_model}
-            models={config.models}
-            onChange={(v) => handleRoleChange('title_model', v)}
-            allowNone
-            disabled={busy}
-          />
         </div>
       </section>
     </div>
@@ -578,21 +550,29 @@ function ProviderRow({
 function ModelRow({
   model,
   providers,
+  isDefault,
+  isTitle,
   isEditing,
   onEdit,
   onCancelEdit,
   onSave,
   onDelete,
+  onSetDefault,
+  onSetTitle,
   onFetchModels,
   busy,
 }: {
   model: ModelInfo;
   providers: APIProvider[];
+  isDefault: boolean;
+  isTitle: boolean;
   isEditing: boolean;
   onEdit: () => void;
   onCancelEdit: () => void;
   onSave: (body: Partial<ModelInfo>) => void;
   onDelete: () => void;
+  onSetDefault: () => void;
+  onSetTitle: () => void;
   onFetchModels: (provider: string) => void;
   busy: boolean;
 }) {
@@ -625,11 +605,23 @@ function ModelRow({
           <div className="model-name">{model.name}</div>
           <div className="model-detail">
             <span className="tag">{model.provider_name}</span>
+            {isDefault && <span className="tag tag-accent">默认</span>}
+            {isTitle && <span className="tag tag-accent">标题</span>}
             <span className="model-id">{model.model_id}</span>
             {model.max_context && <span className="model-ctx">{model.max_context} ctx</span>}
           </div>
         </div>
         <div className="row-actions">
+          {!isDefault && (
+            <button className="btn-icon btn-mini-text" onClick={onSetDefault} title="设为默认模型" disabled={busy}>
+              默认
+            </button>
+          )}
+          {!isTitle && (
+            <button className="btn-icon btn-mini-text" onClick={onSetTitle} title="设为标题生成模型" disabled={busy}>
+              标题
+            </button>
+          )}
           <button className="btn-icon" onClick={onEdit} title="编辑"><Edit2 size={14}/></button>
           <button className="btn-icon" onClick={onDelete} title="删除" disabled={busy}><Trash2 size={14}/></button>
         </div>
@@ -666,6 +658,16 @@ function ModelRow({
           </button>
         </div>
       </div>
+      <div className="form-row">
+        <label>上下文窗口 <span className="optional">（可选，如 128000）</span></label>
+        <input
+          type="number"
+          min="0"
+          value={draft.max_context ?? ''}
+          onChange={e => setDraft({ ...draft, max_context: e.target.value === '' ? null : parseInt(e.target.value) || null })}
+          placeholder="留空则使用默认 100000"
+        />
+      </div>
       <div className="form-actions">
         <button className="btn-secondary" onClick={onCancelEdit}>取消</button>
         <button className="btn-primary" onClick={() => onSave(draft)} disabled={busy}>
@@ -676,36 +678,3 @@ function ModelRow({
   );
 }
 
-function RoleSelector({
-  label,
-  value,
-  models,
-  onChange,
-  allowNone,
-  disabled,
-}: {
-  label: string;
-  value: string | null;
-  models: ModelInfo[];
-  onChange: (v: string) => void;
-  allowNone?: boolean;
-  disabled?: boolean;
-}) {
-  return (
-    <div className="role-selector">
-      <label>{label}</label>
-      <select
-        value={value ?? ''}
-        onChange={e => onChange(e.target.value)}
-        disabled={disabled}
-      >
-        {allowNone && <option value="">（同主模型）</option>}
-        {models.map(m => (
-          <option key={m.name} value={m.name}>
-            {m.name}（{m.provider_name}/{m.model_id}）
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}

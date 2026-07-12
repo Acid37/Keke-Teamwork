@@ -69,8 +69,6 @@ class AppConfig:
     api_key: str = ""
     base_url: str = "https://api.deepseek.com"
     main_model: str = "deepseek-v4-flash"
-    coder_model: str | None = None
-    research_model: str | None = None
     title_model: str | None = None
 
     # ─── 多提供商（新架构）───
@@ -143,7 +141,7 @@ class AppConfig:
 
         迁移规则：
         - 如果 providers 为空，用旧 provider/api_key/base_url 生成一个默认 provider。
-        - 如果 models 为空，用旧 main_model/coder/research/title 生成 model 别名。
+        - 如果 models 为空，用旧 main_model/title 生成 model 别名。
         """
         if not self.providers:
             default_name = self._infer_default_provider_name()
@@ -165,22 +163,7 @@ class AppConfig:
             ))
             used_ids.add(self.main_model)
             self.main_model = "main"
-            if self.coder_model and self.coder_model not in used_ids:
-                self.models.append(ModelInfo(
-                    name="coder",
-                    model_id=self.coder_model,
-                    provider_name=default_provider,
-                ))
-                used_ids.add(self.coder_model)
-                self.coder_model = "coder"
-            if self.research_model and self.research_model not in used_ids:
-                self.models.append(ModelInfo(
-                    name="researcher",
-                    model_id=self.research_model,
-                    provider_name=default_provider,
-                ))
-                used_ids.add(self.research_model)
-                self.research_model = "researcher"
+            # title_model 仍用于标题生成服务，保留迁移
             if self.title_model and self.title_model not in used_ids:
                 self.models.append(ModelInfo(
                     name="title",
@@ -223,10 +206,6 @@ class AppConfig:
             self.base_url = v
         if v := os.getenv("CT_MODEL"):
             self.main_model = v
-        if v := os.getenv("CT_CODER_MODEL"):
-            self.coder_model = v
-        if v := os.getenv("CT_RESEARCH_MODEL"):
-            self.research_model = v
         if v := os.getenv("CT_TITLE_MODEL"):
             self.title_model = v
         if v := os.getenv("CT_HOST"):
@@ -252,7 +231,7 @@ class AppConfig:
         self.save()
 
     # ───────────────────────────────────────────
-    # 向后兼容：effective_*_model 返回裸 model_id
+    # 向后兼容：effective_title_model 返回裸 model_id
     # ───────────────────────────────────────────
 
     def _resolve_alias_to_model_id(self, alias: str | None) -> str:
@@ -263,18 +242,6 @@ class AppConfig:
         if model_info is not None:
             return model_info.model_id
         return alias
-
-    @property
-    def effective_coder_model(self) -> str:
-        return self._resolve_alias_to_model_id(
-            self.coder_model or self.main_model
-        )
-
-    @property
-    def effective_research_model(self) -> str:
-        return self._resolve_alias_to_model_id(
-            self.research_model or self.main_model
-        )
 
     @property
     def effective_title_model(self) -> str:
@@ -299,27 +266,28 @@ class AppConfig:
                 return m
         return None
 
-    def get_model_for_role(self, role: str | None) -> ModelInfo | None:
-        """根据角色返回对应的 ModelInfo。"""
-        alias_map = {
-            "main": self.main_model,
-            "coder": self.coder_model or self.main_model,
-            "researcher": self.research_model or self.main_model,
-            "title": self.title_model or self.main_model,
-        }
-        alias = alias_map.get(role or "main", self.main_model)
+    def get_main_model(self) -> ModelInfo | None:
+        """获取主模型的 ModelInfo。"""
+        alias = self.main_model
         if not alias:
             return None
         model = self.get_model(alias)
         if model:
             return model
-        # 兼容旧用法：alias 本身就是裸 model id
         if self.providers:
-            return ModelInfo(
-                name=alias,
-                model_id=alias,
-                provider_name=self.providers[0].name,
-            )
+            return ModelInfo(name=alias, model_id=alias, provider_name=self.providers[0].name)
+        return None
+
+    def get_title_model(self) -> ModelInfo | None:
+        """获取标题模型的 ModelInfo；未配置时回退到主模型。"""
+        alias = self.title_model or self.main_model
+        if not alias:
+            return None
+        model = self.get_model(alias)
+        if model:
+            return model
+        if self.providers:
+            return ModelInfo(name=alias, model_id=alias, provider_name=self.providers[0].name)
         return None
 
     # ───────────────────────────────────────────
@@ -334,8 +302,6 @@ class AppConfig:
             "api_key_masked": self._mask_key(self.api_key),
             "base_url": self.base_url,
             "main_model": self.main_model,
-            "coder_model": self.coder_model,
-            "research_model": self.research_model,
             "title_model": self.title_model,
             "host": self.host,
             "port": self.port,

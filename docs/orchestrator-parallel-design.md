@@ -55,7 +55,9 @@
 
 ## Researcher 选择策略
 
-第一版会从 `AgentStore.list_agents()` 中选择 `role == "researcher"` 的 Agent，并排除父 Agent 自己。如果没有独立 researcher，而父 Agent 本身就是 researcher，则允许以父 Agent 定义运行一个只读 worker。
+当前实现从 `AgentStore.list_agents()` 中选择**工具集为只读**的 Agent，并排除父 Agent 自己。
+`role` 字段只是显示/组织标签，不参与 researcher 选择。
+如果没有独立只读 Agent，而父 Agent 本身工具集只读，则允许以父 Agent 定义运行一个只读 worker。
 
 每个 worker 都复用 `_run_delegated_agent`，因此工具权限仍被限制为：
 

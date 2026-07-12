@@ -10,8 +10,6 @@ interface ConfigData {
   providers: APIProvider[];
   models: ModelInfo[];
   main_model: string;
-  coder_model: string | null;
-  research_model: string | null;
   title_model: string | null;
   host: string;
   port: number;
@@ -54,8 +52,6 @@ export function SettingsDialog({ open, onClose, appearance, onAppearanceChange }
         providers: data.providers || [],
         models: data.models || [],
         main_model: data.main_model || 'main',
-        coder_model: data.coder_model ?? null,
-        research_model: data.research_model ?? null,
         title_model: data.title_model ?? null,
         host: data.host,
         port: data.port,

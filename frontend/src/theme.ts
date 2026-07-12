@@ -51,35 +51,35 @@ function deriveAccentVars(hex: string): Record<string, string> {
 
   return {
     '--accent': hslStr(h, s, l),
-    '--accent-dim': hslStr(h, Math.min(s, 40), Math.max(l - 30, 15)),
-    '--accent-hover': hslStr(h, s, Math.min(l + 8, 75)),
+    '--accent-dim': hslStr(h, Math.min(s, 32), Math.max(l - 24, 18)),
+    '--accent-hover': hslStr(h, Math.min(s, 92), Math.min(l + 4, 68)),
   };
 }
 
 /** Dark mode base variables. */
 const DARK_VARS: Record<string, string> = {
-  '--bg-primary': '#0f0f0f',
-  '--bg-secondary': '#1a1a1a',
-  '--bg-tertiary': '#242424',
-  '--bg-hover': '#2a2a2a',
-  '--text-primary': '#e8e8e8',
-  '--text-secondary': '#888',
-  '--text-muted': '#555',
-  '--border': '#2a2a2a',
-  '--border-light': '#222',
+  '--bg-primary': '#121212',
+  '--bg-secondary': '#191919',
+  '--bg-tertiary': '#222222',
+  '--bg-hover': '#272727',
+  '--text-primary': '#f2f2f2',
+  '--text-secondary': '#bdbdbd',
+  '--text-muted': '#8a8a8a',
+  '--border': '#2b2b2b',
+  '--border-light': '#232323',
 };
 
 /** Light mode base variables. */
 const LIGHT_VARS: Record<string, string> = {
-  '--bg-primary': '#f5f5f5',
+  '--bg-primary': '#f8fafc',
   '--bg-secondary': '#ffffff',
-  '--bg-tertiary': '#e8e8e8',
-  '--bg-hover': '#e0e0e0',
-  '--text-primary': '#1a1a1a',
-  '--text-secondary': '#666',
-  '--text-muted': '#999',
-  '--border': '#d9d9d9',
-  '--border-light': '#e5e5e5',
+  '--bg-tertiary': '#eef2f7',
+  '--bg-hover': '#e7ebf1',
+  '--text-primary': '#1c1d1f',
+  '--text-secondary': '#4b5563',
+  '--text-muted': '#6b7280',
+  '--border': '#d7dce5',
+  '--border-light': '#e7ecf3',
 };
 
 /** Determine effective mode: auto resolves via system preference. */

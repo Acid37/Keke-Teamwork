@@ -72,6 +72,7 @@ class MainFlowFakeAgent:
         tool_context: ToolContext,
         existing_messages,
         max_tool_rounds: int,
+        context_limit: int = 100_000,
         on_text,
         on_thinking,
         on_tool_call,
@@ -254,10 +255,24 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
         self.assertCountEqual(merged.successful_sources, ["alpha", "beta"])
         self.assertEqual(max_active, 1)
 
-    async def test_parallel_entry_uses_default_agent_store_researcher(self) -> None:
+    async def test_parallel_entry_with_readonly_agents(self) -> None:
+        """使用真实 AgentStore，手动添加只读 Agent 验证并行研究。"""
         with TemporaryDirectory() as tmp:
             data_dir = Path(tmp)
             store = AgentStore(data_dir)
+            # 手动添加只读 Agent（默认 AgentStore 只有 main）
+            store.save_agent(AgentDefinition(
+                agent_id="lib-researcher",
+                name="库研究员",
+                role="researcher",
+                tools=["read_file", "grep_search", "find_files", "list_directory"],
+            ))
+            store.save_agent(AgentDefinition(
+                agent_id="code-reviewer",
+                name="代码审查员",
+                role="reviewer",
+                tools=["read_file", "grep_search", "find_files", "list_directory"],
+            ))
             config = AppConfig(data_dir=data_dir)
             orchestrator = AgentOrchestrator(
                 config=config,
@@ -283,16 +298,14 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
                 context="real AgentStore defaults",
             )
 
-            # 默认 AgentStore 现在包含 researcher 和 reviewer 两个只读 Agent，
-            # 它们都应被选为并行 researcher 候选（按工具权限分流，不按角色名）。
-            self.assertCountEqual(merged.successful_sources, ["researcher", "reviewer"])
-            self.assertIn("default findings from researcher", merged.text)
-            self.assertIn("default findings from reviewer", merged.text)
+            # 手动添加的两个只读 Agent 都应被选为并行 researcher 候选
+            # （按工具权限分流，不按角色名）。
+            self.assertCountEqual(merged.successful_sources, ["lib-researcher", "code-reviewer"])
+            self.assertIn("default findings from lib-researcher", merged.text)
+            self.assertIn("default findings from code-reviewer", merged.text)
             self.assertEqual(len(calls), 2)
             parent_ids = {c["parent_agent_id"] for c in calls}
             self.assertEqual(parent_ids, {"main"})
-            self.assertEqual(calls[0]["parent_agent_id"], "main")
-            self.assertEqual(calls[0]["agent_id"], "researcher")
 
     async def test_parallel_research_alias_uses_clear_entry_name(self) -> None:
         main = make_agent("main", role="assistant")

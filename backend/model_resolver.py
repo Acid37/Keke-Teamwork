@@ -12,8 +12,7 @@ class ModelResolver:
 
     解析优先级（从高到低）：
     1. agent_def.model（per-agent 自定义模型别名或裸 model id）
-    2. 全局角色回退值（coder_model / research_model / title_model → 引用 ModelInfo.name）
-    3. main_model（引用 ModelInfo.name）
+    2. main_model（引用 ModelInfo.name）
     """
 
     def __init__(
@@ -38,22 +37,32 @@ class ModelResolver:
             if model_info is not None:
                 return model_info.model_id
             return agent_def.model
-        # 2. 角色回退
-        role_alias: str | None = None
-        if agent_def.role == "researcher" and self._config.research_model:
-            role_alias = self._config.research_model
-        elif agent_def.role == "coder" and self._config.coder_model:
-            role_alias = self._config.coder_model
-        if role_alias:
-            model_info = self._config.get_model(role_alias)
-            if model_info is not None:
-                return model_info.model_id
-        # 3. main_model
+        # 2. main_model
         if self._config.main_model:
             model_info = self._config.get_model(self._config.main_model)
             if model_info is not None:
                 return model_info.model_id
         return self._config.main_model
+
+    def resolve_context_limit(self, agent_def: AgentDefinition) -> int:
+        """解析 Agent 的上下文窗口限制（token 数）。
+
+        优先级（从高到低）：
+        1. AgentDefinition.max_context（per-agent 覆盖）
+        2. ModelInfo.max_context（模型配置中的上下文窗口）
+        3. 默认 100_000
+        """
+        # 1. per-agent 覆盖
+        if agent_def.max_context is not None:
+            return agent_def.max_context
+        # 2. 模型配置中的 max_context
+        model_alias = agent_def.model or self._config.main_model
+        if model_alias:
+            model_info = self._config.get_model(model_alias)
+            if model_info is not None and model_info.max_context is not None:
+                return model_info.max_context
+        # 3. 默认值
+        return 100_000
 
     def create_llm_for_agent(
         self,

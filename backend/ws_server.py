@@ -53,8 +53,8 @@ class WebSocketServer:
 
     @staticmethod
     def _create_llm(config: AppConfig) -> LLMClient:
-        # 优先用 main_model 角色对应的 model 别名；否则兜底
-        model_info = config.get_model_for_role("main")
+        # 优先用 main_model 对应的 model 别名；否则兜底
+        model_info = config.get_main_model()
         if model_info is None:
             return LLMClient(
                 provider=config.provider,
@@ -134,7 +134,7 @@ class WebSocketServer:
             """
             body = await request.json()
             updates = {}
-            for key in ("provider", "base_url", "main_model", "coder_model", "research_model", "title_model"):
+            for key in ("provider", "base_url", "main_model", "title_model"):
                 if key in body:
                     updates[key] = body[key] or None
             # API key: only update if user provided a new one (not masked)
@@ -152,7 +152,7 @@ class WebSocketServer:
         async def list_models(provider: str | None = None):
             """Fetch available models from a provider.
 
-            - provider: 必填，引用 APIProvider.name。未提供或找不到时回退到 main 角色。
+            - provider: 必填，引用 APIProvider.name。未提供或找不到时回退到 main_model。
             """
             import httpx
 
@@ -161,8 +161,8 @@ class WebSocketServer:
             if provider:
                 target = cfg.get_provider(provider)
             if target is None:
-                # 回退到 main 角色对应的 provider
-                main_model = cfg.get_model_for_role("main")
+                # 回退到 main_model 对应的 provider
+                main_model = cfg.get_main_model()
                 if main_model:
                     target = cfg.get_provider(main_model.provider_name)
             if target is None and cfg.providers:
@@ -371,7 +371,7 @@ class WebSocketServer:
                 old_name = model.name
                 model.name = new_name
                 # 同步角色映射
-                for role_attr in ("main_model", "coder_model", "research_model", "title_model"):
+                for role_attr in ("main_model", "title_model"):
                     if getattr(self._config, role_attr) == old_name:
                         setattr(self._config, role_attr, new_name)
             self._config.save()
@@ -385,17 +385,17 @@ class WebSocketServer:
                 return JSONResponse(
                     {"error": f"Model '{name}' not found"}, status_code=404
                 )
-            # 检查角色引用
+            # 检查配置引用
             used_by_roles = []
-            for role_attr in ("main_model", "coder_model", "research_model", "title_model"):
+            for role_attr in ("main_model", "title_model"):
                 if getattr(self._config, role_attr) == name:
                     used_by_roles.append(role_attr)
             if used_by_roles:
                 return JSONResponse(
                     {
                         "error": (
-                            f"Model '{name}' 仍被角色引用：{used_by_roles}，"
-                            "请先把角色映射改为其他 model。"
+                            f"Model '{name}' 仍被配置引用：{used_by_roles}，"
+                            "请先把对应配置改为其他 model。"
                         )
                     },
                     status_code=400,

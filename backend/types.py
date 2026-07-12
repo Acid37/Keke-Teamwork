@@ -171,6 +171,7 @@ class AgentDefinition:
         "delegate_agent",
     ])
     max_tool_rounds: int = 50
+    max_context: int | None = None    # 覆盖模型上下文窗口（token 数）
     color: str = "#4a9eff"           # 前端显示颜色
     description: str = ""
 
@@ -185,6 +186,7 @@ class AgentDefinition:
             "temperature": self.temperature,
             "tools": self.tools,
             "max_tool_rounds": self.max_tool_rounds,
+            "max_context": self.max_context,
             "color": self.color,
             "description": self.description,
         }

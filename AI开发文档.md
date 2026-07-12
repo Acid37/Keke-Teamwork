@@ -86,11 +86,12 @@ pyproject.toml          # Python 包配置
 
 ```
 agent_def.model（per-agent 指定）
-  → 角色回退值（research_model / coder_model，仅限 researcher/coder 角色）
-    → main_model（全局默认）
+  → main_model（全局默认）
 ```
 
-`coder_model` / `research_model` / `title_model` 仅作为"默认回退值"。任何自定义角色只要设置了 `model` 字段，就优先使用 per-agent model。
+`role` 字段只是显示/组织标签，不触发任何模型回退或特殊工具分流。
+所有自定义角色只要设置了 `model` 字段，就优先使用 per-agent model；否则统一回退到 `main_model`。
+`title_model` 仅用于会话标题生成服务，不属于 Agent 角色模型映射。
 
 ### 工具分类注册
 
@@ -214,8 +215,6 @@ cd frontend && npm run build
 | `CT_API_KEY` | API Key |
 | `CT_BASE_URL` | API 地址 |
 | `CT_MODEL` | 主模型名 |
-| `CT_CODER_MODEL` | coder 角色未指定 per-agent model 时的回退值 |
-| `CT_RESEARCH_MODEL` | researcher 角色未指定 per-agent model 时的回退值 |
 | `CT_TITLE_MODEL` | 标题生成未指定 model 时的回退值 |
 | `CT_HOST` | 监听地址 |
 | `CT_PORT` | 监听端口 |
