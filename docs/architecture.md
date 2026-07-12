@@ -1,6 +1,6 @@
-# AI 开发文档
+# 架构文档
 
-> 本文档面向开发者和 AI 协作助手，用于快速了解项目架构、代码规范和开发约定。
+> 项目架构、技术栈、核心流程和安全设计。
 
 ## 项目概述
 
@@ -53,18 +53,10 @@ frontend/
     theme.ts            # 主题配置
     components/         # UI 组件（AgentManager / ChatArea / SettingsDialog 等）
 
-docs/
-  ROADMAP.md            # 开发计划与里程碑
-  SESSION_AGENDA.md     # 当前分支进展和下一步计划
-  orchestrator-parallel-design.md  # 并行 researcher 设计草案
-
 tests/
   test_delegate_agent.py
   test_orchestrator_parallel.py
   test_tool_categories.py
-
-start.bat               # Windows 一键启动脚本
-pyproject.toml          # Python 包配置
 ```
 
 ## 核心架构
@@ -192,15 +184,6 @@ agent_def.model（per-agent 指定）
 python -m unittest -v
 ```
 
-当前 87 个测试通过，覆盖：
-- 委派工具与 handoff 安全边界
-- 并行 researcher 调度与合并
-- LLM 标题生成与 fallback
-- 工具分类注册与分流判断
-- 命令风险分级（只读/普通/高危）
-- 路径边界保护（工具集成测试）
-- 主流程守卫
-
 ### 前端构建
 
 ```bash
@@ -219,50 +202,3 @@ cd frontend && npm run build
 | `CT_HOST` | 监听地址 |
 | `CT_PORT` | 监听端口 |
 | `CT_CONSOLE_TIMEOUT` | 命令执行超时（秒） |
-
-## 代码规范
-
-### 后端
-
-- Python 3.11+，使用 `from __future__ import annotations` 延迟类型求值
-- 类型注解：`str | None` 而非 `Optional[str]`
-- dataclass 用于数据类型，Enum 用于分类
-- 工具类继承 `Tool`，必须声明 `name`、`description`、`parameters`、`category`
-- 所有新增后端行为都要有不依赖真实 LLM/API 的测试
-- 不加入真实 LLM/API 调用测试
-
-### 前端
-
-- TypeScript strict 模式
-- 组件放 `components/`，状态管理通过 `SessionContext`
-- WebSocket 事件处理集中在 `SessionContext.tsx`
-- Vite 构建已拆分 React / markdown / icons chunk
-
-### 架构原则
-
-1. 多 Agent 默认先只读协作
-2. main Agent 或单一 coder 负责最终写入，避免并发写冲突
-3. researcher 输出先合并、截断、标明来源，再进入 main Agent 上下文
-4. 前端展示事件不等同于模型上下文，后续需要拆分 timeline 与 model messages
-5. 所有新增后端行为都要有不依赖真实 LLM/API 的测试
-
-## 当前限制
-
-- 前端 research/handoff 事件以系统消息展示，尚未做独立时间线视图
-- research/handoff 事件不持久化，刷新后丢失
-- reviewer 审查流尚未落地
-- `Checkpoint` / `FileSnapshot` 类型已定义，未形成完整回滚历史系统
-- per-agent 工具权限策略尚未落地
-- 基础模块（SessionStore、FileStagingArea、EditTool）缺少独立测试
-
-## 开发路线
-
-详见 `docs/ROADMAP.md` 和 `docs/SESSION_AGENDA.md`。
-
-当前优先级：
-
-1. MCP 工具接入
-2. 前端多 Agent 时间线结构化展示
-3. per-agent 工具权限策略
-4. 基础模块测试补全
-5. reviewer 审查流（research → plan → code → review 闭环）

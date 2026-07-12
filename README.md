@@ -106,7 +106,7 @@ Base URL: https://api.deepseek.com
 Model: deepseek-v4-flash
 ```
 
-也可以通过环境变量覆盖配置，详见 `AI开发文档.md`。
+也可以通过环境变量覆盖配置，详见 `docs/architecture.md`。
 
 ## 使用方式
 
@@ -136,7 +136,9 @@ Model: deepseek-v4-flash
 
 ## 开发者文档
 
-项目架构、工具分类、代码规范和开发路线等技术细节，详见 [`AI开发文档.md`](AI开发文档.md)。
+项目架构和工具分类等技术细节，详见 [`docs/architecture.md`](docs/architecture.md)。  
+代码规范和架构原则，详见 [`docs/conventions.md`](docs/conventions.md)。  
+开发路线和当前待办，详见 [`docs/roadmap.md`](docs/roadmap.md) 和 [`docs/sprint/current.md`](docs/sprint/current.md)。
 
 ## 许可证
 
