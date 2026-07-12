@@ -1,18 +1,20 @@
 from pathlib import Path
 from backend.types import ToolResult
-from backend.tools.base import Tool
+from backend.tools.base import Tool, ToolCategory
+from backend.safety.path_guard import resolve_path, PathBoundaryError
 
 
 class WriteTool(Tool):
-    """Write or create files."""
+    """写入或创建文件。"""
 
     name = "write_file"
-    description = "Write content to a file. Creates the file if it doesn't exist, overwrites if it does."
+    category = ToolCategory.file
+    description = "写入内容到文件。如果文件不存在则创建，已存在则覆盖。"
     parameters = {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "File path to write (relative to work_dir or absolute)"},
-            "content": {"type": "string", "description": "Content to write to the file"},
+            "path": {"type": "string", "description": "文件路径（相对于 work_dir 或绝对路径）"},
+            "content": {"type": "string", "description": "要写入的文件内容"},
         },
         "required": ["path", "content"],
     }
@@ -22,10 +24,11 @@ class WriteTool(Tool):
             path_str = kwargs["path"]
             content = kwargs["content"]
 
-            # Resolve path relative to work_dir
-            file_path = Path(path_str)
-            if not file_path.is_absolute():
-                file_path = self._ctx.work_dir / file_path
+            # Resolve path relative to work_dir, with boundary protection
+            try:
+                file_path = resolve_path(path_str, self._ctx.work_dir)
+            except PathBoundaryError as e:
+                return (False, str(e))
 
             # Get relative path for display
             try:
@@ -48,4 +51,4 @@ class WriteTool(Tool):
                 return (True, f"File written: {rel_path} ({len(content)} bytes)")
 
         except Exception as e:
-            return (False, f"Error writing file: {e}")
+            return (False, f"写入文件错误: {e}")

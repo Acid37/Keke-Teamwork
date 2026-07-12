@@ -14,6 +14,10 @@ from backend.tools import TOOL_REGISTRY
 from backend.tools.delegate import DelegateTool
 from backend.types import AgentDefinition, AgentResult, Phase, Session, TokenUsage, ToolContext
 
+# 策略 B 拆分后，delegate/handoff 逻辑移到 DelegateRunner，
+# Agent patch 路径改为 backend.delegate_runner.Agent。
+# run_user_message 主流程仍在 orchestrator.py，需要双 patch。
+
 
 class FakeBroadcast:
     def __init__(self) -> None:
@@ -62,7 +66,7 @@ class DelegateAgentTests(IsolatedAsyncioTestCase):
         success, result = await tool.execute(agent_id="researcher", task="inspect")
 
         self.assertFalse(success)
-        self.assertIn("Delegation is not available", result)
+        self.assertIn("当前上下文不支持委派", result)
 
     async def test_orchestrator_delegated_agent_is_read_only(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -118,8 +122,6 @@ class DelegateAgentTests(IsolatedAsyncioTestCase):
             config.api_key = "test-key"
             config.base_url = "https://example.invalid/v1"
             config.main_model = "shared-model"
-            config.research_model = "shared-model"
-            config.coder_model = "shared-model"
             store = FakeStore(researcher)
             broadcast = FakeBroadcast()
 
@@ -147,6 +149,7 @@ class DelegateAgentTests(IsolatedAsyncioTestCase):
                     tool_context: ToolContext,
                     existing_messages,
                     max_tool_rounds: int,
+                    context_limit: int = 100_000,
                     on_text,
                     on_thinking,
                     on_tool_call,
@@ -189,8 +192,8 @@ class DelegateAgentTests(IsolatedAsyncioTestCase):
                 permission_managers={},
             )
 
-            with patch("backend.orchestrator.Agent", FakeAgent):
-                result = await orchestrator._run_delegated_agent(
+            with patch("backend.delegate_runner.Agent", FakeAgent):
+                result = await orchestrator._delegate_runner.run_delegated(
                     session=session,
                     broadcast=broadcast,
                     parent_agent_id="main",
@@ -245,7 +248,6 @@ class DelegateAgentTests(IsolatedAsyncioTestCase):
             config.api_key = "test-key"
             config.base_url = "https://example.invalid/v1"
             config.main_model = "shared-model"
-            config.coder_model = "shared-model"
             broadcast = FakeBroadcast()
             staging = FileStagingArea(work_dir)
             permission_mgr = PermissionManager(broadcast=broadcast, yolo_mode=True)
@@ -271,6 +273,7 @@ class DelegateAgentTests(IsolatedAsyncioTestCase):
                     tool_context: ToolContext,
                     existing_messages,
                     max_tool_rounds: int,
+                    context_limit: int = 100_000,
                     on_text,
                     on_thinking,
                     on_tool_call,
@@ -295,8 +298,8 @@ class DelegateAgentTests(IsolatedAsyncioTestCase):
                 permission_managers={},
             )
 
-            with patch("backend.orchestrator.Agent", FakeAgent):
-                result = await orchestrator._run_handoff_agent(
+            with patch("backend.delegate_runner.Agent", FakeAgent):
+                result = await orchestrator._delegate_runner.run_handoff(
                     session=session,
                     broadcast=broadcast,
                     parent_agent_id="main",
@@ -363,7 +366,6 @@ class DelegateAgentTests(IsolatedAsyncioTestCase):
             config.api_key = "test-key"
             config.base_url = "https://example.invalid/v1"
             config.main_model = "shared-model"
-            config.coder_model = "shared-model"
             session = Session(id="session-flow-handoff", work_dir=work_dir, solo_mode=False)
             broadcast = FakeBroadcast()
 
@@ -383,6 +385,7 @@ class DelegateAgentTests(IsolatedAsyncioTestCase):
                     tool_context: ToolContext,
                     existing_messages,
                     max_tool_rounds: int,
+                    context_limit: int = 100_000,
                     on_text,
                     on_thinking,
                     on_tool_call,
@@ -430,7 +433,8 @@ class DelegateAgentTests(IsolatedAsyncioTestCase):
                 permission_managers={},
             )
 
-            with patch("backend.orchestrator.Agent", FakeAgent):
+            with patch("backend.orchestrator.Agent", FakeAgent), \
+                 patch("backend.delegate_runner.Agent", FakeAgent):
                 await orchestrator.run_user_message(
                     session=session,
                     text="please implement this",

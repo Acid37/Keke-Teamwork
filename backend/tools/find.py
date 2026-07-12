@@ -1,19 +1,21 @@
 import os
 from pathlib import Path
 from backend.types import ToolResult
-from backend.tools.base import Tool
+from backend.tools.base import Tool, ToolCategory
+from backend.safety.path_guard import resolve_path, PathBoundaryError
 
 
 class FindTool(Tool):
-    """Find files by name pattern."""
+    """按名称模式查找文件。"""
 
     name = "find_files"
-    description = "Find files matching a glob pattern."
+    category = ToolCategory.search
+    description = "查找匹配 glob 模式的文件。"
     parameters = {
         "type": "object",
         "properties": {
-            "pattern": {"type": "string", "description": "Glob pattern to match files (e.g., '*.py', '**/*.ts')"},
-            "path": {"type": "string", "description": "Directory to search in (default: work_dir)"},
+            "pattern": {"type": "string", "description": "文件匹配的 glob 模式（如 '*.py', '**/*.ts'）"},
+            "path": {"type": "string", "description": "搜索目录（默认：work_dir）"},
         },
         "required": ["pattern"],
     }
@@ -23,18 +25,19 @@ class FindTool(Tool):
             pattern = kwargs["pattern"]
             path_str = kwargs.get("path")
 
-            # Resolve path
+            # Resolve path with boundary protection
             if path_str:
-                search_path = Path(path_str)
-                if not search_path.is_absolute():
-                    search_path = self._ctx.work_dir / search_path
+                try:
+                    search_path = resolve_path(path_str, self._ctx.work_dir)
+                except PathBoundaryError as e:
+                    return (False, str(e))
             else:
-                search_path = self._ctx.work_dir
+                search_path = self._ctx.work_dir.resolve()
 
             if not search_path.exists():
-                return (False, f"Path not found: {search_path}")
+                return (False, f"路径未找到: {search_path}")
             if not search_path.is_dir():
-                return (False, f"Not a directory: {search_path}")
+                return (False, f"不是一个目录: {search_path}")
 
             # Directories to skip
             skip_dirs = {".git", "node_modules", "__pycache__", "venv", ".venv", "dist", "build"}
@@ -65,10 +68,10 @@ class FindTool(Tool):
                 # Sort results
                 matches.sort()
                 if len(matches) >= 200:
-                    matches.append("... (results truncated)")
+                    matches.append("... (结果已截断)")
                 return (True, "\n".join(matches))
             else:
-                return (True, "No files found")
+                return (True, "未找到匹配文件")
 
         except Exception as e:
-            return (False, f"Error: {e}")
+            return (False, f"错误: {e}")

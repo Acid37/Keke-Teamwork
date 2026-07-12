@@ -1,8 +1,8 @@
-"""Agent runtime — the core Tool Calling loop.
+"""Agent 运行时——核心 Tool Calling 循环。
 
-An Agent = LLM + private tool set + dual-layer loop:
-  Outer loop: call LLM → get response
-  Inner loop: if tool calls → execute tools → feed results back → repeat
+一个 Agent = LLM + 私有工具集 + 双层循环：
+  外层循环：调用 LLM → 获取响应
+  内层循环：如果有 tool calls → 执行工具 → 回馈结果 → 重复
 """
 
 from __future__ import annotations
@@ -100,6 +100,7 @@ class Agent:
         tool_history: list[dict] = []
         usage = TokenUsage()
         tool_rounds = 0
+        llm_error: str | None = None
 
         while True:
             # ── Call LLM ──
@@ -136,6 +137,7 @@ class Agent:
                 if on_text:
                     await on_text(f"\n\n[Error: {error_msg}]")
                 total_text += f"\n\n[Error: {error_msg}]"
+                llm_error = error_msg
                 break
 
             total_text += round_text
@@ -224,11 +226,11 @@ class Agent:
                     "content": f"[User Guidance]\n{guidance_text}",
                 })
 
-            # Context compression check
+            # 上下文压缩检查
             estimated = self._estimate_tokens(messages)
             if estimated > context_limit * 0.85:
                 logger.info(
-                    "Context limit approaching (%d tokens estimated), compressing",
+                    "接近上下文上限（估算 %d token），开始压缩",
                     estimated,
                 )
                 messages = await self._compress_context(messages, context_limit)
@@ -246,6 +248,7 @@ class Agent:
             tool_calls_history=tool_history,
             usage=usage,
             messages=messages,
+            error=llm_error,
         )
 
     # ─── Internal helpers ───
@@ -264,25 +267,37 @@ class Agent:
 
     @staticmethod
     def _estimate_tokens(messages: list[dict]) -> int:
-        """Rough token estimate: total chars / 3 (good enough for CJK mixed)."""
-        total_chars = sum(
-            len(str(m.get("content", "") or ""))
-            + len(json.dumps(m.get("tool_calls", []), ensure_ascii=False))
-            for m in messages
-        )
-        return total_chars // 3
+        """粗略估算 token 数。
+
+        CJK 字符（中日韩）按 1 字符 ≈ 1 token 估算，
+        ASCII 字符按 4 字符 ≈ 1 token 估算。
+        比统一 chars//3 更准确，尤其对中文密集的项目。
+        """
+        total_tokens = 0
+        for m in messages:
+            content = str(m.get("content", "") or "")
+            cjk_count = sum(1 for ch in content if ord(ch) > 0x2E80)
+            ascii_count = len(content) - cjk_count
+            total_tokens += cjk_count + ascii_count // 4
+            tool_calls = m.get("tool_calls", [])
+            if tool_calls:
+                tc_text = json.dumps(tool_calls, ensure_ascii=False)
+                cjk_tc = sum(1 for ch in tc_text if ord(ch) > 0x2E80)
+                ascii_tc = len(tc_text) - cjk_tc
+                total_tokens += cjk_tc + ascii_tc // 4
+        return total_tokens
 
     async def _compress_context(
         self, messages: list[dict], limit: int
     ) -> list[dict]:
-        """Compress context by summarizing old messages with LLM.
+        """通过 LLM 摘要压缩旧上下文。
 
-        Strategy:
-        1. Keep the system prompt (first message if role=system)
-        2. Keep the last 3 rounds of conversation untouched
-        3. Summarize everything in between
+        策略：
+        1. 保留 system 消息（开头的 role=system）
+        2. 保留最后 3 轮对话不动（6 条消息）
+        3. 中间部分用 LLM 摘要替代
         """
-        # Find system message
+        # 分离 system 消息和对话
         system_msgs = []
         conversation = []
         for msg in messages:
@@ -292,23 +307,23 @@ class Agent:
                 conversation.append(msg)
 
         if len(conversation) <= 6:
-            return messages  # Too short to compress
+            return messages  # 太短，不值得压缩
 
-        # Split: old messages to summarize + recent to keep
-        keep_count = 6  # last 3 rounds (each round = assistant + tool result)
+        # 拆分：旧消息（待摘要）+ 最近消息（保留）
+        keep_count = 6  # 最后 3 轮（每轮 = assistant + tool result）
         old_msgs = conversation[:-keep_count]
         recent_msgs = conversation[-keep_count:]
 
-        # Build summary prompt
+        # 构建摘要提示词
         summary_input = json.dumps(old_msgs, ensure_ascii=False, default=str)
         if len(summary_input) > 30_000:
-            summary_input = summary_input[:30_000] + "\n...(truncated)"
+            summary_input = summary_input[:30_000] + "\n...(已截断)"
 
         summary_prompt = (
-            "Summarize the following conversation history concisely. "
-            "Focus on: what was the user's goal, what tools were called, "
-            "what were the key results, and what is the current state.\n\n"
-            f"Conversation:\n{summary_input}"
+            "请简洁地总结以下对话历史。"
+            "重点关注：用户的目标是什么、调用了哪些工具、"
+            "关键结果是什么、当前状态如何。\n\n"
+            f"对话内容：\n{summary_input}"
         )
 
         try:
@@ -322,16 +337,16 @@ class Agent:
                 if event.finish:
                     break
         except Exception:
-            logger.warning("Context compression LLM call failed, keeping original")
+            logger.warning("上下文压缩 LLM 调用失败，保留原始消息")
             return messages
 
-        # Rebuild messages: system + summary + recent
+        # 重建消息：system + 摘要 + 最近消息
         compressed = system_msgs + [
             {
                 "role": "system",
                 "content": (
-                    f"[Previous conversation summary]\n{summary_text}\n"
-                    "[End of summary — continue from where the conversation left off]"
+                    f"[之前的对话摘要]\n{summary_text}\n"
+                    "[摘要结束——请从对话中断处继续]"
                 ),
             }
         ] + recent_msgs
@@ -339,7 +354,7 @@ class Agent:
         old_est = self._estimate_tokens(messages)
         new_est = self._estimate_tokens(compressed)
         logger.info(
-            "Context compressed: %d → %d estimated tokens (%d messages → %d)",
+            "上下文已压缩：%d → %d 估算 token（%d 条消息 → %d 条）",
             old_est, new_est, len(messages), len(compressed),
         )
 

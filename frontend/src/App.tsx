@@ -12,7 +12,7 @@ const DEFAULT_APPEARANCE: AppearanceConfig = {
   theme_color: '#4a9eff',
   wallpaper: null,
   wallpaper_blur: 10,
-  wallpaper_opacity: 0.5,
+  wallpaper_opacity: 0.28,
   font_size: 14,
   accent_preset: 'blue',
 }

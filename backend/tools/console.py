@@ -1,19 +1,20 @@
 import asyncio
 import os
 from backend.types import ToolResult
-from backend.tools.base import Tool
+from backend.tools.base import Tool, ToolCategory
 
 
 class ConsoleTool(Tool):
-    """Execute shell commands."""
+    """执行 shell 命令。"""
 
     name = "run_console"
-    description = "Execute a shell command and return the output."
+    category = ToolCategory.shell
+    description = "执行 shell 命令并返回输出。"
     parameters = {
         "type": "object",
         "properties": {
-            "command": {"type": "string", "description": "Shell command to execute"},
-            "timeout": {"type": "integer", "description": "Timeout in seconds (default: 30)", "default": 30},
+            "command": {"type": "string", "description": "要执行的 shell 命令"},
+            "timeout": {"type": "integer", "description": "超时时间（秒，默认 30）", "default": 30},
         },
         "required": ["command"],
     }
@@ -28,13 +29,13 @@ class ConsoleTool(Tool):
                 try:
                     perm_result = self._ctx.permission_mgr.check(command)
                     if perm_result == "deny":
-                        return (False, "Command denied by permission rules")
+                        return (False, "命令被权限规则拒绝")
                     if perm_result == "needs_approval":
                         approved = await self._ctx.permission_mgr.request_approval(command)
                         if not approved:
-                            return (False, "Command denied by user or approval timed out")
+                            return (False, "命令被用户拒绝或审批超时")
                 except Exception as e:
-                    return (False, f"Command approval failed: {e}")
+                    return (False, f"命令审批失败: {e}")
 
             # Execute command
             try:
@@ -52,7 +53,7 @@ class ConsoleTool(Tool):
                 except asyncio.TimeoutError:
                     process.kill()
                     await process.wait()
-                    return (False, f"Command timed out after {timeout} seconds")
+                    return (False, f"命令执行超时（{timeout} 秒）")
 
                 # Decode output
                 output = stdout.decode("utf-8", errors="replace")
@@ -62,7 +63,7 @@ class ConsoleTool(Tool):
                 lines = output.split("\n")
                 if len(lines) > console_max_output:
                     lines = lines[:console_max_output]
-                    lines.append(f"... (output truncated, {len(output.split(chr(10))) - console_max_output} more lines)")
+                    lines.append(f"... (输出已截断，省略 {len(output.split(chr(10))) - console_max_output} 行)")
                     output = "\n".join(lines)
 
                 # Broadcast if callback available
@@ -79,7 +80,7 @@ class ConsoleTool(Tool):
                 return (success, output)
 
             except Exception as e:
-                return (False, f"Error executing command: {e}")
+                return (False, f"执行命令错误: {e}")
 
         except Exception as e:
-            return (False, f"Error: {e}")
+            return (False, f"错误: {e}")

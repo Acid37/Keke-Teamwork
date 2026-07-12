@@ -1,12 +1,10 @@
-"""File write-ahead staging area.
+"""文件写入暂存区（write-ahead staging）。
 
-Core pattern: record original content before write → write immediately to disk
-→ on success generate diff / on failure rollback.
+核心模式：写入前记录原始内容 → 立即写入磁盘 → 成功则生成 diff / 失败则回滚。
 
-Why write to disk immediately (instead of temp files)?
-Because console commands need to see real disk state. If write only writes
-to temp files, subsequent console commands (e.g. npm run build) can't read
-the newly written files.
+为什么立即写入磁盘（而非临时文件）？
+因为 console 命令需要看到真实的磁盘状态。如果只写入临时文件，
+后续的 console 命令（如 npm run build）无法读取新写入的文件。
 """
 
 from __future__ import annotations

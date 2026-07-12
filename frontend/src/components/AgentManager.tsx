@@ -41,6 +41,7 @@ export function AgentManager({ models, onFetchModels, loadingModels }: AgentMana
   const [formSystemPrompt, setFormSystemPrompt] = useState('');
   const [formTools, setFormTools] = useState<string[]>([]);
   const [formMaxRounds, setFormMaxRounds] = useState(50);
+  const [formMaxContext, setFormMaxContext] = useState<number | ''>('');
   const [formColor, setFormColor] = useState(COLOR_PRESETS[0]);
 
   const fetchAgents = useCallback(async () => {
@@ -80,6 +81,7 @@ export function AgentManager({ models, onFetchModels, loadingModels }: AgentMana
     setFormSystemPrompt('');
     setFormTools(tools.map((t) => t.name));
     setFormMaxRounds(50);
+    setFormMaxContext('');
     setFormColor(COLOR_PRESETS[0]);
   }
 
@@ -101,6 +103,7 @@ export function AgentManager({ models, onFetchModels, loadingModels }: AgentMana
     setFormSystemPrompt(agent.system_prompt);
     setFormTools([...agent.tools]);
     setFormMaxRounds(agent.max_tool_rounds);
+    setFormMaxContext(agent.max_context ?? '');
     setFormColor(agent.color);
     setEditing(agent);
     setIsCreating(false);
@@ -142,6 +145,7 @@ export function AgentManager({ models, onFetchModels, loadingModels }: AgentMana
         system_prompt: formSystemPrompt,
         tools: formTools,
         max_tool_rounds: formMaxRounds,
+        max_context: formMaxContext === '' ? null : formMaxContext,
         color: formColor,
       };
 
@@ -282,9 +286,9 @@ export function AgentManager({ models, onFetchModels, loadingModels }: AgentMana
               />
             </div>
 
-            {/* Role */}
+            {/* Tag */}
             <div className="settings-field">
-              <label>角色</label>
+              <label>标签</label>
               <div className="role-presets">
                 {ROLE_PRESETS.map((r) => (
                   <button
@@ -301,7 +305,7 @@ export function AgentManager({ models, onFetchModels, loadingModels }: AgentMana
                   type="text"
                   value={formRole}
                   onChange={(e) => setFormRole(e.target.value)}
-                  placeholder="自定义角色标签"
+                  placeholder="自定义标签"
                   style={{ marginTop: '6px' }}
                 />
               )}
@@ -368,6 +372,18 @@ export function AgentManager({ models, onFetchModels, loadingModels }: AgentMana
                 max="200"
                 value={formMaxRounds}
                 onChange={(e) => setFormMaxRounds(parseInt(e.target.value) || 50)}
+              />
+            </div>
+
+            {/* Max context */}
+            <div className="settings-field">
+              <label>上下文窗口 <span className="optional">（留空使用模型默认）</span></label>
+              <input
+                type="number"
+                min="0"
+                placeholder="如 128000"
+                value={formMaxContext}
+                onChange={(e) => setFormMaxContext(e.target.value === '' ? '' : parseInt(e.target.value) || '')}
               />
             </div>
 
