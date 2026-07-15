@@ -134,6 +134,45 @@ class Session:
             self.last_active_at = now
 
 
+# ─── Agent 权限 ───
+
+@dataclass
+class AgentPermissions:
+    """Per-agent 细粒度权限配置。
+
+    每个 Agent 可在 agents.json 中声明自己的权限边界：
+    - allowed_paths / denied_paths：文件类工具的路径约束
+    - max_command_risk：shell 命令的风险预算
+    - allow_delegation / allow_handoff：委派相关的控制
+    """
+    allowed_paths: list[str] | None = None   # glob 模式，如 ["src/**", "tests/**"]；None = work_dir 内全部允许
+    denied_paths: list[str] | None = None    # glob 模式，如 ["**/*.secret.*"]；None = 无额外拒绝
+    max_command_risk: str = "dangerous"       # "read_only" | "normal" | "dangerous"；默认无风险限制（向后兼容）
+    allow_delegation: bool = True            # 是否可委派给其他 Agent
+    allow_handoff: bool = True               # 是否可被其他 Agent handoff
+
+    def to_dict(self) -> dict:
+        return {
+            "allowed_paths": self.allowed_paths,
+            "denied_paths": self.denied_paths,
+            "max_command_risk": self.max_command_risk,
+            "allow_delegation": self.allow_delegation,
+            "allow_handoff": self.allow_handoff,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict | None) -> AgentPermissions | None:
+        if not data:
+            return None
+        return cls(
+            allowed_paths=data.get("allowed_paths"),
+            denied_paths=data.get("denied_paths"),
+            max_command_risk=data.get("max_command_risk", "normal"),
+            allow_delegation=data.get("allow_delegation", True),
+            allow_handoff=data.get("allow_handoff", True),
+        )
+
+
 # ─── 工具上下文 ───
 
 @dataclass
@@ -149,6 +188,7 @@ class ToolContext:
     checkpoint_mgr: Any = None  # CheckpointManager | None
     permission_mgr: Any = None  # PermissionManager | None
     delegate_runner: Any = None  # delegate_agent 工具的回调（避免循环导入）
+    agent_permissions: Any = None  # AgentPermissions | None
     broadcast: Callable[..., Awaitable[None]] | None = None
     interrupt_check: Callable[[], bool] | None = None
 
@@ -174,9 +214,10 @@ class AgentDefinition:
     max_context: int | None = None    # 覆盖模型上下文窗口（token 数）
     color: str = "#4a9eff"           # 前端显示颜色
     description: str = ""
+    permissions: AgentPermissions | None = None  # v0.3: per-agent 权限
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "agent_id": self.agent_id,
             "name": self.name,
             "role": self.role,
@@ -190,11 +231,17 @@ class AgentDefinition:
             "color": self.color,
             "description": self.description,
         }
+        if self.permissions:
+            d["permissions"] = self.permissions.to_dict()
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> AgentDefinition:
         known = {f.name for f in cls.__dataclass_fields__.values()}
         filtered = {k: v for k, v in data.items() if k in known}
+        # 权限字段单独处理
+        if "permissions" in data:
+            filtered["permissions"] = AgentPermissions.from_dict(data["permissions"])
         return cls(**filtered)
 
 

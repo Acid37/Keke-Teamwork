@@ -27,7 +27,10 @@ class ConsoleTool(Tool):
             # Check permission if permission_mgr available
             if self._ctx.permission_mgr:
                 try:
-                    perm_result = self._ctx.permission_mgr.check(command)
+                    max_risk = "normal"
+                    if self._ctx.agent_permissions:
+                        max_risk = getattr(self._ctx.agent_permissions, "max_command_risk", "normal")
+                    perm_result = self._ctx.permission_mgr.check(command, max_command_risk=max_risk)
                     if perm_result == "deny":
                         return (False, "命令被权限规则拒绝")
                     if perm_result == "needs_approval":

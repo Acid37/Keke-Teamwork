@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from backend.types import ToolResult
 from backend.tools.base import Tool, ToolCategory
-from backend.safety.path_guard import resolve_path, PathBoundaryError
+from backend.safety.path_guard import resolve_path, check_agent_path_permissions, PathBoundaryError, AgentPathDeniedError
 
 
 class GrepTool(Tool):
@@ -37,6 +37,12 @@ class GrepTool(Tool):
                     return (False, str(e))
             else:
                 search_path = self._ctx.work_dir.resolve()
+
+            # Check agent-level path permissions
+            try:
+                check_agent_path_permissions(search_path, self._ctx.work_dir, self._ctx.agent_permissions)
+            except AgentPathDeniedError as e:
+                return (False, str(e))
 
             if not search_path.exists():
                 return (False, f"路径未找到: {search_path}")

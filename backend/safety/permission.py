@@ -30,18 +30,29 @@ class PermissionManager:
         self._timeout_seconds = timeout_seconds
         self._pending: dict[str, asyncio.Future[bool]] = {}
 
-    def check(self, command: str) -> str:
+    def check(self, command: str, max_command_risk: str = "dangerous") -> str:
         """返回 allow / deny / needs_approval。
 
         使用命令风险分级：
         - read_only 命令始终放行
         - dangerous 命令始终需审批（即使 YOLO）
         - normal 命令遵循 YOLO 模式
+
+        max_command_risk 为 Agent 的风险预算上限。若命令风险超过此预算，
+        直接 deny（即使命令本身是 normal）。例如 max_command_risk="read_only"
+        的 Agent 不能执行任何 normal 或 dangerous 命令。
         """
         if not command.strip():
             return "deny"
 
         risk = classify_command(command)
+
+        # 风险预算检查：命令风险等级超过 Agent 预算 → 拒绝
+        risk_order = {"read_only": 0, "normal": 1, "dangerous": 2}
+        budget = risk_order.get(max_command_risk, 1)
+        cmd_risk = risk_order.get(risk.value, 1)
+        if cmd_risk > budget:
+            return "deny"
 
         if risk == CommandRisk.read_only:
             return "allow"

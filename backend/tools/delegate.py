@@ -37,6 +37,11 @@ class DelegateTool(Tool):
         if not runner:
             return (False, "当前上下文不支持委派")
 
+        # Check agent-level permission: allow_delegation
+        perms = getattr(self._ctx, "agent_permissions", None)
+        if perms and not getattr(perms, "allow_delegation", True):
+            return (False, "当前 Agent 不允许委派任务给其他 Agent")
+
         agent_id = kwargs.get("agent_id") or "researcher"
         task = (kwargs.get("task") or "").strip()
         context = (kwargs.get("context") or "").strip()

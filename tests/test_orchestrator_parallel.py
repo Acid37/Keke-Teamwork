@@ -298,12 +298,14 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
                 context="real AgentStore defaults",
             )
 
-            # 手动添加的两个只读 Agent 都应被选为并行 researcher 候选
-            # （按工具权限分流，不按角色名）。
-            self.assertCountEqual(merged.successful_sources, ["lib-researcher", "code-reviewer"])
+            # 手动添加的两个只读 Agent + 内置 planner（也是只读）都应被选为候选。
+            # 内置 coder（有写工具）和 reviewer（有 run_console）不会被选。
+            expected_sources = {"lib-researcher", "code-reviewer", "planner"}
+            self.assertCountEqual(merged.successful_sources, expected_sources)
             self.assertIn("default findings from lib-researcher", merged.text)
             self.assertIn("default findings from code-reviewer", merged.text)
-            self.assertEqual(len(calls), 2)
+            self.assertTrue(any("planner" in s for s in merged.successful_sources))
+            self.assertEqual(len(calls), 3)
             parent_ids = {c["parent_agent_id"] for c in calls}
             self.assertEqual(parent_ids, {"main"})
 

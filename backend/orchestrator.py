@@ -122,7 +122,7 @@ class AgentOrchestrator:
         staging = FileStagingArea(session.work_dir)
         permission_mgr = PermissionManager(broadcast=broadcast, yolo_mode=session.yolo_mode)
         self._permission_managers[session.id] = permission_mgr
-        tool_context = self._build_tool_context(session, aid, staging, permission_mgr, broadcast)
+        tool_context = self._build_tool_context(session, aid, staging, permission_mgr, broadcast, agent_def)
         broadcast_tool_call, broadcast_tool_result = _make_tool_broadcasters(aid, arole, broadcast)
 
         # 构建 Agent
@@ -182,7 +182,7 @@ class AgentOrchestrator:
                 "task": text, "text": "", "timed_out": False, "error": str(exc)})
             return ""
 
-    def _build_tool_context(self, session, aid, staging, permission_mgr, broadcast) -> ToolContext:
+    def _build_tool_context(self, session, aid, staging, permission_mgr, broadcast, agent_def=None) -> ToolContext:
         """构建工具执行上下文，包含子 Agent 委派闭包。"""
         async def run_child_agent(agent_id: str, task: str, context: str = "") -> str:
             child_def = self._agent_store.get_agent(agent_id)
@@ -195,9 +195,11 @@ class AgentOrchestrator:
                 session=session, broadcast=broadcast, parent_agent_id=aid,
                 agent_id=agent_id, task=task, context=context)
 
+        agent_perms = agent_def.permissions if agent_def else None
         return ToolContext(
             session=session, work_dir=session.work_dir, staging=staging,
             permission_mgr=permission_mgr, delegate_runner=run_child_agent,
+            agent_permissions=agent_perms,
             broadcast=broadcast, interrupt_check=lambda: session.interrupt_requested)
 
     def _create_agent(self, llm, agent_def, effective_model, session) -> Agent:
@@ -206,7 +208,7 @@ class AgentOrchestrator:
                      max_tool_rounds=agent_def.max_tool_rounds,
                      agent_id=agent_def.agent_id, role=agent_def.role, agent_name=agent_def.name)
         agent.tools = resolve_tools(agent_def.tools) if agent_def.tools else ALL_TOOLS
-        agent.system_prompt = agent_def.system_prompt if agent_def.system_prompt else build_system_prompt(session)
+        agent.system_prompt = agent_def.system_prompt if agent_def.system_prompt else build_system_prompt(session, agent_def)
         return agent
 
     async def _finalize_success(self, session, result, text, agent_user_message,

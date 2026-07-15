@@ -19,21 +19,21 @@
 > 依赖：v0.2 收尾完成。
 > 目标：没有这个，工作流引擎就是在沙滩上盖楼。
 
-### P0：per-agent 工具权限策略
+### P0：per-agent 工具权限策略 ✅
 
-- [ ] 从 `is_read_only_tool_set()` / `has_write_tool()` 二值判断升级为 **per-agent 工具白名单**
-- [ ] 路径约束：Agent 可配置 `allowed_paths` / `denied_paths`（如 coder 只能写 `src/`，不能碰 `config/`）
-- [ ] 命令风险预算：per-agent 最大允许风险等级（如 reviewer 只能执行只读命令）
-- [ ] `AgentDefinition` 扩展 `permissions` 字段
-- [ ] 测试：权限边界、路径约束、风险预算拒绝场景
+- [x] 从 `is_read_only_tool_set()` / `has_write_tool()` 二值判断升级为 **per-agent 细粒度权限**
+- [x] 路径约束：Agent 可配置 `allowed_paths` / `denied_paths`（如 coder 只能写 `src/`，不能碰 `config/`）
+- [x] 命令风险预算：per-agent 最大允许风险等级（如 planner/reviewer 只能执行只读命令）
+- [x] `AgentDefinition` 扩展 `permissions` 字段（`AgentPermissions` dataclass）
+- [x] 测试：27 个新测试覆盖序列化、路径约束、风险预算、内置角色预设
 
-### P0：内置角色 Agent 定义
+### P0：内置角色 Agent 定义 ✅
 
-- [ ] **planner Agent**：只读工具 + 规划型 system prompt，产出结构化 task list
-- [ ] **coder Agent**：全套读写工具（受权限约束）+ 编码型 system prompt
-- [ ] **reviewer Agent**：只读工具 + diff 审查型 system prompt，产出 review report
-- [ ] 默认 `agents.json` 从 1 个 "通用助手" 扩展为 4 个（main + planner + coder + reviewer）
-- [ ] `role` 字段语义化：开始参与行为分流（如 `role=coder` 的 Agent 在 plan 阶段自动静默）
+- [x] **planner Agent**：只读工具 + 规划型 system prompt，产出结构化 task list
+- [x] **coder Agent**：全套读写工具（受权限约束）+ 编码型 system prompt
+- [x] **reviewer Agent**：只读工具 + diff 审查型 system prompt，产出 review report
+- [x] 默认 `agents.json` 从 1 个 "通用助手" 扩展为 4 个（main + planner + coder + reviewer）
+- [x] `role` 字段语义化：`build_system_prompt()` 根据 role 返回差异化提示词
 
 ### P0：基础模块测试补全
 

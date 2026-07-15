@@ -50,7 +50,9 @@ class DelegateRunner:
 
         child_context = ToolContext(
             session=session, work_dir=session.work_dir, staging=None,
-            permission_mgr=None, delegate_runner=None, broadcast=broadcast,
+            permission_mgr=None, delegate_runner=None,
+            agent_permissions=agent_def.permissions,
+            broadcast=broadcast,
             interrupt_check=lambda: session.interrupt_requested)
 
         user_msg = (
@@ -71,6 +73,11 @@ class DelegateRunner:
                           permission_mgr: PermissionManager = None) -> str:
         """运行一个串行子 Agent，复用父 Agent 的写入安全边界。"""
         agent_def = self._validate(agent_id, parent_agent_id)
+
+        # Check allow_handoff
+        if agent_def.permissions and not agent_def.permissions.allow_handoff:
+            raise ValueError(f"Agent '{agent_id}' 不允许接收 handoff 任务")
+
         agent_tools = resolve_tools([n for n in agent_def.tools if n != "delegate_agent"])
 
         aid, aname, arole, acolor = agent_def.agent_id, agent_def.name, agent_def.role, agent_def.color
@@ -82,7 +89,9 @@ class DelegateRunner:
 
         child_context = ToolContext(
             session=session, work_dir=session.work_dir, staging=staging,
-            permission_mgr=permission_mgr, delegate_runner=None, broadcast=broadcast,
+            permission_mgr=permission_mgr, delegate_runner=None,
+            agent_permissions=agent_def.permissions,
+            broadcast=broadcast,
             interrupt_check=lambda: session.interrupt_requested)
 
         user_msg = (
