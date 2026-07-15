@@ -20,8 +20,10 @@
 
 ## 架构原则
 
-1. 多 Agent 默认先只读协作
-2. main Agent 或单一 coder 负责最终写入，避免并发写冲突
-3. researcher 输出先合并、截断、标明来源，再进入 main Agent 上下文
-4. 前端展示事件不等同于模型上下文，后续需要拆分 timeline 与 model messages
-5. 所有新增后端行为都要有不依赖真实 LLM/API 的测试
+1. **工作流驱动，Agent 执行**：工作流决定调度，Agent 决定执行。两层解耦。
+2. **角色 = 工具集 + 权限边界 + 行为提示词**：`role` 不是标签，是完整的 Agent 配置剖面。
+3. **每个 Agent 都是完整的能力实体**：无论 planner、coder 还是 reviewer，都拥有完整的 tool-calling 循环，能独立装配 MCP/skill。
+4. **阶段间数据结构化**：不靠纯文本注入传递信息。plan → task list，code → diff set，review → report。
+5. **写操作单一出口**：无论工作流中有多少个 Agent，同一时刻只有一个 Agent 持有写权限，避免并发冲突。
+6. **前端展示 ≠ 模型上下文**：timeline 是给人看的，model messages 是给 LLM 看的，两者独立管理。
+7. **所有新增后端行为都要有不依赖真实 LLM/API 的测试。**

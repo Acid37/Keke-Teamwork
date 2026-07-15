@@ -4,14 +4,20 @@
 
 ## 项目概述
 
-Keke Teamwork 是一个本地多 Agent 协作工作台，当前处于 **v0.2** 阶段。核心能力：
+Keke Teamwork 是一个本地多 Agent 协作工作台，当前处于 **v0.3** 规划阶段。
+
+两层架构：
+- **工作流层**：定义"谁在什么时候做什么"（Plan → Code → Review 闭环，v0.4 落地）。
+- **Agent 能力层**：每个角色 Agent 都是完整的 tool-calling 实体，可装配任意工具、MCP、skill。
+
+当前已具备的核心能力：
 
 - 单 Agent tool-calling 主循环 + 多 Agent 编排（Orchestrator）
 - 只读并行 researcher 探索 + 安全 handoff 写入
-- 工具分类注册与按分类自动分流
-- 文件 staging / diff / 回滚 + 命令审批
+- 工具分类注册与按分类自动分流（当前为二值：只读/可写）
+- 文件 staging / diff / 回滚 + 命令审批 + 路径保护
 - 会话持久化 + LLM 语义标题
-- 自定义 Agent 角色（per-agent 模型 / 工具 / 提示词）
+- 自定义 Agent 定义（per-agent 模型 / 工具 / 提示词）
 - React + Vite 前端，WebSocket 实时通信
 
 ## 技术栈
@@ -81,8 +87,7 @@ agent_def.model（per-agent 指定）
   → main_model（全局默认）
 ```
 
-`role` 字段只是显示/组织标签，不触发任何模型回退或特殊工具分流。
-所有自定义角色只要设置了 `model` 字段，就优先使用 per-agent model；否则统一回退到 `main_model`。
+`role` 字段当前只是显示/组织标签，不触发模型回退或工具分流。v0.3 将使其语义化，与 toolset 共同决定 Agent 行为。
 `title_model` 仅用于会话标题生成服务，不属于 Agent 角色模型映射。
 
 ### 工具分类注册
@@ -145,18 +150,26 @@ agent_def.model（per-agent 指定）
 
 ## 默认 Agent 定义
 
-首次启动时写入 `agents.json`，包含 5 个示例角色：
+### 当前状态（v0.2）
+
+首次启动时写入 `agents.json`，仅包含 1 个默认 Agent：
+
+| agent_id | 名称 | 角色 | 工具 | 说明 |
+|---|---|---|---|---|
+| `main` | 通用助手 | assistant | 全部 8 个工具 | 通用编程助手，拥有全部工具权限 |
+
+> 用户可通过 UI 创建任意自定义 Agent。多 Agent 协作（researcher/coder 等）依赖用户手动创建对应 Agent。
+
+### v0.3 计划
+
+内置 4 个默认 Agent，形成基本角色矩阵：
 
 | agent_id | 名称 | 角色 | 工具 | 说明 |
 |---|---|---|---|---|
 | `main` | 通用助手 | assistant | 全部工具 | 通用编程助手 |
-| `researcher` | 研究员 | researcher | 只读工具 | 只读研究，分析代码库 |
-| `coder` | 编码专家 | coder | 读写 + console | 专注编码实现 |
-| `reviewer` | 代码审查员 | reviewer | 只读工具 | 检查代码质量和潜在问题 |
-| `doc_writer` | 文档撰写师 | doc_writer | 读写 + 搜索（无 console） | 文档撰写 |
-
-用户可创建任意自定义角色，不限于以上预设。
-
+| `planner` | 方案规划师 | planner | 只读 + delegate | 拆解任务，产出结构化 task list |
+| `coder` | 编码专家 | coder | 读写 + console（受权限约束） | 专注编码实现 |
+| `reviewer` | 代码审查员 | reviewer | 只读工具 | 审查 code diff，产出 review report |
 ## 运行模式
 
 | 模式 | 作用 |

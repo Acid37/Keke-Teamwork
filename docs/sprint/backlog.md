@@ -4,19 +4,19 @@
 
 ## 暂不做（边界声明）
 
-- 不允许并行 researcher 写文件
-- 不加入真实 LLM/API 调用测试
-- 不重构完整 timeline/session 持久化模型（先做事件持久化）
-- 不把 researcher 原始全文无节制注入 main Agent 上下文
+- 不允许并行 Agent 同时写文件——同一时刻只有一个 Agent 持有写权限
+- 不引入真实 LLM/API 调用测试——保持测试纯确定性
+- 不把 researcher/子 Agent 原始全文无节制注入主 Agent 上下文——始终走摘要+截断
+- 不把"前端多 Agent 时间线"提前到工作流引擎之前——先有数据再有展示
 
-## 长期积压
+## 长期积压（v0.6+）
 
 - `Checkpoint` / `FileSnapshot` 类型已定义，未形成完整回滚历史系统
-- 前端 research/handoff 事件以系统消息展示，尚未做独立时间线视图（已在 current.md 排期）
-- research/handoff 事件不持久化，刷新后丢失（已在 current.md 排期）
-- reviewer 审查流尚未落地（已在 current.md 排期）
-- per-agent 工具权限策略尚未落地（已在 current.md 排期）
-- 基础模块（SessionStore、FileStagingArea、EditTool）缺少独立测试（已在 current.md 排期）
+- 工作流模板市场：用户可分享和导入预定义工作流（如"代码审查"、"技术调研"、"重构"）
+- 多项目并行会话：同时打开多个项目，每个有独立会话和工作流
+- Agent 间直接通信协议：不通过 orchestrator 中转，Agent 可直接向其他 Agent 发送结构化消息
+- 工作流断点续跑：会话关闭后重开，从上次中断的阶段继续
+- 人机协同工作流：在特定阶段（如 plan 产出后）暂停等待用户审核，用户可修改计划后继续
 
 ## 已完成（归档）
 
