@@ -39,6 +39,8 @@ class APIProvider:
                 d["api_key_masked"] = self.api_key[:4] + "****" + self.api_key[-4:]
             else:
                 d["api_key_masked"] = "****" if self.api_key else ""
+            # 安全：抹掉明文 key
+            d["api_key"] = ""
         return d
 
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Trash2, Edit3, Save, X, ChevronDown, ChevronUp, Loader2, Shield } from 'lucide-react';
-import type { AgentDefinition, AgentPermissions, ToolInfo } from '../types';
+import { Plus, Trash2, Edit3, Save, X, Loader2, Shield } from 'lucide-react';
+import type { AgentDefinition, ToolInfo } from '../types';
 
 const COLOR_PRESETS = [
   '#4a9eff', '#7c3aed', '#10b981', '#f59e0b', '#ef4444',

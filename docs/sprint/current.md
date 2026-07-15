@@ -58,12 +58,15 @@
 
 ## v0.4 预览 — 工作流引擎
 
-> 依赖 v0.3 完成。此处仅列概要，不做具体拆解。
+> 依赖 v0.3 完成。
+> 
+> 📐 设计文档：[docs/designs/workflow-engine.md](../designs/workflow-engine.md)
 
 - 阶段管理器：`Phase` 扩展为 `PLANNING → CODING → REVIEWING`，带转换规则
 - 自动触发：plan 产出 task list → 调度 coder，code 完成 → 调度 reviewer
 - 阶段间结构化数据传递（`TaskList` → `DiffSet` → `ReviewReport`）
 - reviewer 审查流：自动接收 diff，逐文件审查，反馈可回环到 coder
+- 中断与恢复：用户可在任意阶段介入修正，工作流挂起/恢复
 
 ---
 

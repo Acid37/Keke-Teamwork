@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+﻿import { useState, useEffect, useCallback } from 'react';
 import { Plus, Trash2, Edit2, Save, X, Loader2, RefreshCw, Check } from 'lucide-react';
 import type { APIProvider, ModelInfo } from '../types';
+import { QUICK_PRESETS, CLIENT_TYPE_OPTIONS } from '../constants';
 
 interface ModelSettingsProps {
   /** 当前完整配置（含 providers/models）*/
@@ -15,22 +16,6 @@ interface ModelSettingsProps {
   /** Toast 提示（外部传入，避免依赖）*/
   onMessage?: (kind: 'success' | 'error', text: string) => void;
 }
-
-const CLIENT_TYPE_OPTIONS = [
-  { value: 'openai', label: 'OpenAI 兼容' },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'gemini', label: 'Google Gemini' },
-];
-
-const QUICK_PRESETS = [
-  { name: 'DeepSeek', url: 'https://api.deepseek.com' },
-  { name: '通义千问', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
-  { name: 'GLM', url: 'https://open.bigmodel.cn/api/paas/v4' },
-  { name: 'Kimi', url: 'https://api.moonshot.cn/v1' },
-  { name: 'Step', url: 'https://api.stepfun.com/v1' },
-  { name: 'MiniMax', url: 'https://api.minimax.chat/v1' },
-  { name: 'OpenAI', url: 'https://api.openai.com/v1' },
-];
 
 export function ModelSettings({ config, onConfigChange, onMessage }: ModelSettingsProps) {
   const [providerDraft, setProviderDraft] = useState<Partial<APIProvider> | null>(null);

@@ -1,19 +1,13 @@
-import { useState, useEffect } from 'react';
+﻿import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronRight, ChevronLeft, Zap, Shield, Bot, Loader2, Key } from 'lucide-react';
+import { Check, ChevronRight, ChevronLeft, Zap, Bot, Loader2, Key } from 'lucide-react';
 import type { APIProvider, ModelInfo } from '../types';
+import { QUICK_PRESETS } from '../constants';
 
 interface SetupWizardProps {
   open: boolean;
   onComplete: () => void;
 }
-
-const QUICK_PRESETS = [
-  { name: 'DeepSeek', url: 'https://api.deepseek.com', models: ['deepseek-v4-flash', 'deepseek-chat'] },
-  { name: '通义千问', url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', models: ['qwen-plus', 'qwen-max'] },
-  { name: 'GLM', url: 'https://open.bigmodel.cn/api/paas/v4', models: ['glm-4-plus', 'glm-4-flash'] },
-  { name: 'Kimi', url: 'https://api.moonshot.cn/v1', models: ['moonshot-v1-8k'] },
-];
 
 const STEP_TITLES = ['选择服务商', '配置 API Key', '确认默认角色'];
 
@@ -34,8 +28,9 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   function selectPreset(preset: typeof QUICK_PRESETS[0]) {
     setProviderName(preset.name.toLowerCase());
     setBaseUrl(preset.url);
-    setAvailableModels(preset.models);
-    setModelId(preset.models[0]);
+    const models = preset.models ?? [];
+    setAvailableModels(models);
+    setModelId(models[0] ?? '');
     setShowCustomModel(false);
   }
 
