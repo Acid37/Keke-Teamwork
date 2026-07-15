@@ -8,6 +8,9 @@
 - 类型注解：`str | None` 而非 `Optional[str]`
 - dataclass 用于数据类型，Enum 用于分类
 - 工具类继承 `Tool`，必须声明 `name`、`description`、`parameters`、`category`
+- 工具类路径解析统一调用 `self._resolve_and_check_path(path_str)`，不要手写 resolve+check 两段式
+- 读写文件必须显式传 `newline=''`，禁止依赖默认通用换行转换（会导致 CRLF 平台差异）
+- `to_dict()` 优先用 `asdict()` + 后处理，避免手工罗列字段（增删字段易遗漏）
 - 所有新增后端行为都要有不依赖真实 LLM/API 的测试
 - 不加入真实 LLM/API 调用测试
 
@@ -16,6 +19,10 @@
 - TypeScript strict 模式
 - 组件放 `components/`，状态管理通过 `SessionContext`
 - WebSocket 事件处理集中在 `SessionContext.tsx`
+- 调用后端 API 统一用 `utils/api.ts` 的 `apiGet`/`apiPost`/`apiPut`/`apiDelete`，禁止裸 `fetch()`
+- 异步操作加载态统一用 `utils/useAsyncAction.ts` 的 `{ busy, run }`，禁止手写 `setBusy(true/false)` + `try/finally`
+- 跨组件共享常量放 `constants.ts`（如 `QUICK_PRESETS`、`CLIENT_TYPE_OPTIONS`）
+- 跨组件共享类型接口放 `types.ts`（如 `ModelConfig`），组件内 interface 用 `extends` 而非重复字段
 - Vite 构建已拆分 React / markdown / icons chunk
 
 ## 架构原则

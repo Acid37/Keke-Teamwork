@@ -29,8 +29,8 @@
 
 ### P0：基础模块测试补全 ✅
 
-- [x] SessionStore (14) + FileStagingArea (19) + EditTool (12) + PermissionManager (19)
-- [x] 总计 216 测试全部通过
+- [x] SessionStore (14) + FileStagingArea (19) + EditTool (13) + PermissionManager (19)
+- [x] 总计 217 测试全部通过
 
 ### P1：Setup Wizard ✅
 
@@ -51,6 +51,8 @@
 - [x] AgentPermissions/AgentDefinition.to_dict 统一 asdict()
 - [x] ws_server.py PUT /api/agents permissions setattr Bug 修复
 - [x] 前端 utils/api.ts + useAsyncAction.ts — 消除 21 处 fetch/setBusy 重复
+- [x] edit.py newline='' 修复 — 消除 Linux CI CRLF 失败（+ 回归守卫测试）
+- [x] conventions.md 补充新约定（newline / api.ts / useAsyncAction / _resolve_and_check_path）
 - [x] 四轮审查：0 死导入，0 lint error，净减 201 行
 
 ---
