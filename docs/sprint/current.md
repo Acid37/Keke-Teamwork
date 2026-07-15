@@ -35,12 +35,12 @@
 - [x] 默认 `agents.json` 从 1 个 "通用助手" 扩展为 4 个（main + planner + coder + reviewer）
 - [x] `role` 字段语义化：`build_system_prompt()` 根据 role 返回差异化提示词
 
-### P0：基础模块测试补全
+### P0：基础模块测试补全 ✅
 
-- [ ] `SessionStore` save/load/list/delete
-- [ ] `FileStagingArea` create/modify/delete/rollback + diff 生成验证
-- [ ] `EditTool` 精确替换、重复匹配和换行兼容
-- [ ] `PermissionManager` 审批流程、超时、拒绝
+- [x] `SessionStore` save/load/list/delete（14 个测试）
+- [x] `FileStagingArea` create/modify/delete/rollback + diff 生成验证（19 个测试）
+- [x] `EditTool` 精确替换、重复匹配、换行兼容、权限集成、staging 集成（12 个测试）
+- [x] `PermissionManager` 审批流程、超时、拒绝、风险预算（19 个测试）
 
 ### P1：Setup Wizard
 
