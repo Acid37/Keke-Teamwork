@@ -1,7 +1,6 @@
 from pathlib import Path
 from backend.types import ToolResult
 from backend.tools.base import Tool, ToolCategory
-from backend.safety.path_guard import resolve_path, check_agent_path_permissions, PathBoundaryError, AgentPathDeniedError
 
 
 class LsTool(Tool):
@@ -24,20 +23,9 @@ class LsTool(Tool):
             path_str = kwargs.get("path")
             depth = kwargs.get("depth", 2)
 
-            # Resolve path with boundary protection
-            if path_str:
-                try:
-                    target_path = resolve_path(path_str, self._ctx.work_dir)
-                except PathBoundaryError as e:
-                    return (False, str(e))
-            else:
-                target_path = self._ctx.work_dir.resolve()
-
-            # Check agent-level path permissions
-            try:
-                check_agent_path_permissions(target_path, self._ctx.work_dir, self._ctx.agent_permissions)
-            except AgentPathDeniedError as e:
-                return (False, str(e))
+            target_path = self._resolve_and_check_path(path_str)
+            if isinstance(target_path, tuple):
+                return target_path
 
             if not target_path.exists():
                 return (False, f"路径未找到: {target_path}")

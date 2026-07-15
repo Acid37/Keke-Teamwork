@@ -42,6 +42,14 @@ export interface ModelInfo {
   extra_params: Record<string, any>;
 }
 
+/** 模型配置子集 — ModelSettings / SettingsDialog 共享 */
+export interface ModelConfig {
+  providers: APIProvider[];
+  models: ModelInfo[];
+  main_model: string;
+  title_model: string | null;
+}
+
 export interface ToolInfo {
   name: string;
   description: string;

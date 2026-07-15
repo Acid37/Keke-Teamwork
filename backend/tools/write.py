@@ -1,7 +1,5 @@
-from pathlib import Path
 from backend.types import ToolResult
 from backend.tools.base import Tool, ToolCategory
-from backend.safety.path_guard import resolve_path, check_agent_path_permissions, PathBoundaryError, AgentPathDeniedError
 
 
 class WriteTool(Tool):
@@ -24,17 +22,9 @@ class WriteTool(Tool):
             path_str = kwargs["path"]
             content = kwargs["content"]
 
-            # Resolve path relative to work_dir, with boundary protection
-            try:
-                file_path = resolve_path(path_str, self._ctx.work_dir)
-            except PathBoundaryError as e:
-                return (False, str(e))
-
-            # Check agent-level path permissions
-            try:
-                check_agent_path_permissions(file_path, self._ctx.work_dir, self._ctx.agent_permissions)
-            except AgentPathDeniedError as e:
-                return (False, str(e))
+            file_path = self._resolve_and_check_path(path_str)
+            if isinstance(file_path, tuple):
+                return file_path
 
             # Get relative path for display
             try:

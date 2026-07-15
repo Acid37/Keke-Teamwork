@@ -23,6 +23,7 @@ from backend.session import SessionStore
 from backend.tools import ALL_TOOLS
 from backend.types import (
     AgentDefinition,
+    AgentPermissions,
     Phase,
     Session,
 )
@@ -453,7 +454,10 @@ class WebSocketServer:
             # Merge body into existing definition
             for key, value in body.items():
                 if hasattr(existing, key) and key != "agent_id":
-                    setattr(existing, key, value)
+                    if key == "permissions":
+                        existing.permissions = AgentPermissions.from_dict(value)
+                    else:
+                        setattr(existing, key, value)
             self._agent_store.save_agent(existing)
             return {"status": "ok", "agent": existing.to_dict()}
 

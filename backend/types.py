@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -152,13 +152,9 @@ class AgentPermissions:
     allow_handoff: bool = True               # 是否可被其他 Agent handoff
 
     def to_dict(self) -> dict:
-        return {
-            "allowed_paths": self.allowed_paths,
-            "denied_paths": self.denied_paths,
-            "max_command_risk": self.max_command_risk,
-            "allow_delegation": self.allow_delegation,
-            "allow_handoff": self.allow_handoff,
-        }
+        d = asdict(self)
+        # asdict 自动包含所有 dataclass 字段，无需手工罗列
+        return d
 
     @classmethod
     def from_dict(cls, data: dict | None) -> AgentPermissions | None:
@@ -167,7 +163,7 @@ class AgentPermissions:
         return cls(
             allowed_paths=data.get("allowed_paths"),
             denied_paths=data.get("denied_paths"),
-            max_command_risk=data.get("max_command_risk", "normal"),
+            max_command_risk=data.get("max_command_risk", "dangerous"),
             allow_delegation=data.get("allow_delegation", True),
             allow_handoff=data.get("allow_handoff", True),
         )
@@ -217,20 +213,7 @@ class AgentDefinition:
     permissions: AgentPermissions | None = None  # v0.3: per-agent 权限
 
     def to_dict(self) -> dict:
-        d = {
-            "agent_id": self.agent_id,
-            "name": self.name,
-            "role": self.role,
-            "system_prompt": self.system_prompt,
-            "provider": self.provider,
-            "model": self.model,
-            "temperature": self.temperature,
-            "tools": self.tools,
-            "max_tool_rounds": self.max_tool_rounds,
-            "max_context": self.max_context,
-            "color": self.color,
-            "description": self.description,
-        }
+        d = asdict(self)
         if self.permissions:
             d["permissions"] = self.permissions.to_dict()
         return d

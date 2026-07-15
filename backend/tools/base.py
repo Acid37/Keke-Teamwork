@@ -1,6 +1,13 @@
 from enum import Enum
+from pathlib import Path
 
 from backend.types import ToolSchema, ToolResult, ToolContext
+from backend.safety.path_guard import (
+    resolve_path,
+    check_agent_path_permissions,
+    PathBoundaryError,
+    AgentPathDeniedError,
+)
 
 
 class ToolCategory(str, Enum):
@@ -36,3 +43,15 @@ class Tool:
 
     def to_schema(self) -> ToolSchema:
         return ToolSchema(self.name, self.description, self.parameters)
+
+    def _resolve_and_check_path(self, path_str: str | None) -> tuple[bool, str] | Path:
+        """解析路径 + 检查 Agent 权限。成功返回 Path，失败返回 (False, msg)。"""
+        try:
+            target = resolve_path(path_str, self._ctx.work_dir) if path_str is not None else self._ctx.work_dir.resolve()
+        except PathBoundaryError as e:
+            return (False, str(e))
+        try:
+            check_agent_path_permissions(target, self._ctx.work_dir, self._ctx.agent_permissions)
+        except AgentPathDeniedError as e:
+            return (False, str(e))
+        return target

@@ -1,8 +1,9 @@
 ﻿import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronRight, ChevronLeft, Zap, Bot, Loader2, Key } from 'lucide-react';
-import type { APIProvider, ModelInfo } from '../types';
 import { QUICK_PRESETS } from '../constants';
+import { useAsyncAction } from '../utils/useAsyncAction';
+import { apiPost, apiPut } from '../utils/api';
 
 interface SetupWizardProps {
   open: boolean;
@@ -20,7 +21,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const [customModelId, setCustomModelId] = useState('');
   const [fetchingModels, setFetchingModels] = useState(false);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
+  const { busy, run } = useAsyncAction((msg) => setError(msg));
   const [error, setError] = useState('');
   const [showCustomModel, setShowCustomModel] = useState(false);
 
@@ -57,56 +58,27 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
 
   // Step 2: Submit setup
   async function handleComplete() {
-    setBusy(true);
     setError('');
-    try {
-      // Create provider
-      const provRes = await fetch('/api/config/providers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: providerName,
-          client_type: 'openai',
-          base_url: baseUrl,
-          api_key: apiKey,
-          enabled: true,
-        }),
+    await run(async () => {
+      await apiPost('/api/config/providers', {
+        name: providerName,
+        client_type: 'openai',
+        base_url: baseUrl,
+        api_key: apiKey,
+        enabled: true,
       });
-      const provData = await provRes.json();
-      if (provData.error) {
-        setError(provData.error);
-        setBusy(false);
-        return;
-      }
 
-      // Create model
       const modelName = showCustomModel && customModelId ? customModelId : modelId;
-      await fetch('/api/config/models', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'main',
-          model_id: modelName,
-          provider_name: providerName,
-        }),
+      await apiPost('/api/config/models', {
+        name: 'main',
+        model_id: modelName,
+        provider_name: providerName,
       });
 
-      // Update main_model
-      await fetch('/api/config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ main_model: 'main' }),
-      });
-
-      // Mark setup complete
-      await fetch('/api/setup/complete', { method: 'POST' });
-
+      await apiPut('/api/config', { main_model: 'main' });
+      await apiPost('/api/setup/complete');
       onComplete();
-    } catch (e) {
-      setError('网络错误：' + (e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   function canNext(): boolean {
@@ -289,7 +261,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
           )}
           <div className="setup-footer-spacer" />
           {step < 2 ? (
-            <button className="btn-primary" onClick={() => setStep(step + 1)} disabled={!canNext()}>
+            <button className="btn-primary" onClick={() => setStep(step + 1)} disabled={busy || !canNext()}>
               下一步 <ChevronRight size={16} />
             </button>
           ) : (

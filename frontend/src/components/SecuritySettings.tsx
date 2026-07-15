@@ -1,47 +1,30 @@
-import { useState } from 'react';
-import { Shield, AlertTriangle, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Shield, AlertTriangle, ToggleLeft, ToggleRight, Loader2 } from 'lucide-react';
+import { apiPut } from '../utils/api';
+import { useAsyncAction } from '../utils/useAsyncAction';
 
 interface SecuritySettingsProps {
   config: {
     yolo_mode?: boolean;
     auto_review?: boolean;
     solo_mode?: boolean;
-    console_timeout?: number;
-    console_max_output?: number;
-    max_parallel_researchers?: number;
   };
   onConfigChange: (partial: Record<string, unknown>) => void;
   onMessage?: (kind: 'success' | 'error', text: string) => void;
 }
 
 export function SecuritySettings({ config, onConfigChange, onMessage }: SecuritySettingsProps) {
-  const [saving, setSaving] = useState(false);
+  const { busy, run } = useAsyncAction((msg) => onMessage?.('error', msg));
 
   async function saveSecuritySetting(key: string, value: unknown) {
-    setSaving(true);
-    try {
-      const res = await fetch('/api/config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [key]: value }),
-      });
-      const data = await res.json();
-      if (data.error) {
-        onMessage?.('error', data.error);
-      } else {
-        onConfigChange({ [key]: value });
-        onMessage?.('success', '安全设置已更新');
-      }
-    } catch {
-      onMessage?.('error', '保存失败');
-    } finally {
-      setSaving(false);
-    }
+    await run(async () => {
+      await apiPut('/api/config', { [key]: value });
+      onConfigChange({ [key]: value });
+      onMessage?.('success', '安全设置已更新');
+    });
   }
 
   return (
     <div className="security-settings">
-      {/* YOLO Mode */}
       <div className="security-card">
         <div className="security-card-header">
           <Shield size={18} />
@@ -54,9 +37,10 @@ export function SecuritySettings({ config, onConfigChange, onMessage }: Security
           <button
             className={`toggle-btn ${config.yolo_mode ? 'active' : ''}`}
             onClick={() => saveSecuritySetting('yolo_mode', !config.yolo_mode)}
-            disabled={saving}
+            disabled={busy}
           >
-            {config.yolo_mode ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
+            {busy ? <Loader2 size={28} className="spinner" /> :
+              config.yolo_mode ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
           </button>
         </div>
         {config.yolo_mode && (
@@ -67,7 +51,6 @@ export function SecuritySettings({ config, onConfigChange, onMessage }: Security
         )}
       </div>
 
-      {/* Auto Review */}
       <div className="security-card">
         <div className="security-card-header">
           <Shield size={18} />
@@ -80,14 +63,14 @@ export function SecuritySettings({ config, onConfigChange, onMessage }: Security
           <button
             className={`toggle-btn ${config.auto_review ? 'active' : ''}`}
             onClick={() => saveSecuritySetting('auto_review', !config.auto_review)}
-            disabled={saving}
+            disabled={busy}
           >
-            {config.auto_review ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
+            {busy ? <Loader2 size={28} className="spinner" /> :
+              config.auto_review ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
           </button>
         </div>
       </div>
 
-      {/* Solo Mode */}
       <div className="security-card">
         <div className="security-card-header">
           <Shield size={18} />
@@ -100,9 +83,10 @@ export function SecuritySettings({ config, onConfigChange, onMessage }: Security
           <button
             className={`toggle-btn ${config.solo_mode ? 'active' : ''}`}
             onClick={() => saveSecuritySetting('solo_mode', !config.solo_mode)}
-            disabled={saving}
+            disabled={busy}
           >
-            {config.solo_mode ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
+            {busy ? <Loader2 size={28} className="spinner" /> :
+              config.solo_mode ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
           </button>
         </div>
       </div>

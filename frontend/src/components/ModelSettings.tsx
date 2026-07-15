@@ -1,19 +1,13 @@
 ﻿import { useState, useEffect, useCallback } from 'react';
-import { Plus, Trash2, Edit2, Save, X, Loader2, RefreshCw, Check } from 'lucide-react';
-import type { APIProvider, ModelInfo } from '../types';
+import { Plus, Trash2, Edit2, Save, Loader2, RefreshCw } from 'lucide-react';
+import type { APIProvider, ModelInfo, ModelConfig } from '../types';
 import { QUICK_PRESETS, CLIENT_TYPE_OPTIONS } from '../constants';
+import { apiPost, apiPut, apiDelete } from '../utils/api';
+import { useAsyncAction } from '../utils/useAsyncAction';
 
 interface ModelSettingsProps {
-  /** 当前完整配置（含 providers/models）*/
-  config: {
-    providers: APIProvider[];
-    models: ModelInfo[];
-    main_model: string;
-    title_model: string | null;
-  };
-  /** 触发整体重载（保存后由父组件调用）*/
-  onConfigChange: (config: ModelSettingsProps['config']) => void;
-  /** Toast 提示（外部传入，避免依赖）*/
+  config: ModelConfig;
+  onConfigChange: (config: ModelConfig) => void;
   onMessage?: (kind: 'success' | 'error', text: string) => void;
 }
 
@@ -24,7 +18,7 @@ export function ModelSettings({ config, onConfigChange, onMessage }: ModelSettin
   const [editingModelName, setEditingModelName] = useState<string | null>(null);
   const [modelList, setModelList] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const { busy, run } = useAsyncAction((msg) => onMessage?.('error', msg));
 
   const fetchModelsFor = useCallback(async (providerName: string) => {
     setLoadingModels(true);
@@ -58,72 +52,33 @@ export function ModelSettings({ config, onConfigChange, onMessage }: ModelSettin
       onMessage?.('error', `提供商 ${providerDraft.name} 已存在`);
       return;
     }
-    setBusy(true);
-    try {
-      const res = await fetch('/api/config/providers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(providerDraft),
-      });
-      const data = await res.json();
-      if (data.error) {
-        onMessage?.('error', data.error);
-        return;
-      }
+    await run(async () => {
+      const data = await apiPost<{ provider: APIProvider }>('/api/config/providers', providerDraft);
       onMessage?.('success', `已添加提供商 ${data.provider.name}`);
       setProviderDraft(null);
       onConfigChange({ ...config, providers: [...config.providers, data.provider] });
-    } catch (e) {
-      onMessage?.('error', '网络错误：' + (e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function handleUpdateProvider(name: string, body: Partial<APIProvider>) {
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/config/providers/${encodeURIComponent(name)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (data.error) {
-        onMessage?.('error', data.error);
-        return;
-      }
-      // 本地同步
+    await run(async () => {
+      const data = await apiPut<{ provider: APIProvider }>(`/api/config/providers/${encodeURIComponent(name)}`, body);
       const newProviders = config.providers.map(p =>
         p.name === name ? { ...p, ...data.provider } : p
       );
       onConfigChange({ ...config, providers: newProviders });
       onMessage?.('success', '已更新');
       setEditingProviderName(null);
-    } catch (e) {
-      onMessage?.('error', '网络错误：' + (e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function handleDeleteProvider(name: string) {
     if (!confirm(`删除提供商 "${name}"？`)) return;
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/config/providers/${encodeURIComponent(name)}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (data.error) {
-        onMessage?.('error', data.error);
-        return;
-      }
+    await run(async () => {
+      await apiDelete(`/api/config/providers/${encodeURIComponent(name)}`);
       onConfigChange({ ...config, providers: config.providers.filter(p => p.name !== name) });
       onMessage?.('success', '已删除');
-    } catch (e) {
-      onMessage?.('error', '网络错误：' + (e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   // ─── Model CRUD ───
@@ -133,94 +88,41 @@ export function ModelSettings({ config, onConfigChange, onMessage }: ModelSettin
       onMessage?.('error', '请填写名称、模型 ID 和所属提供商');
       return;
     }
-    setBusy(true);
-    try {
-      const res = await fetch('/api/config/models', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(modelDraft),
-      });
-      const data = await res.json();
-      if (data.error) {
-        onMessage?.('error', data.error);
-        return;
-      }
+    await run(async () => {
+      const data = await apiPost<{ model: ModelInfo }>('/api/config/models', modelDraft);
       onConfigChange({ ...config, models: [...config.models, data.model] });
       onMessage?.('success', `已添加模型 ${data.model.name}`);
       setModelDraft(null);
-    } catch (e) {
-      onMessage?.('error', '网络错误：' + (e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function handleUpdateModel(name: string, body: Partial<ModelInfo>) {
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/config/models/${encodeURIComponent(name)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (data.error) {
-        onMessage?.('error', data.error);
-        return;
-      }
+    await run(async () => {
+      const data = await apiPut<{ model: ModelInfo }>(`/api/config/models/${encodeURIComponent(name)}`, body);
       onConfigChange({ ...config, models: config.models.map(m =>
         m.name === name ? { ...m, ...data.model } : m
       )});
       onMessage?.('success', '已更新');
       setEditingModelName(null);
-    } catch (e) {
-      onMessage?.('error', '网络错误：' + (e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function handleDeleteModel(name: string) {
     if (!confirm(`删除模型 "${name}"？`)) return;
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/config/models/${encodeURIComponent(name)}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (data.error) {
-        onMessage?.('error', data.error);
-        return;
-      }
+    await run(async () => {
+      await apiDelete(`/api/config/models/${encodeURIComponent(name)}`);
       onConfigChange({ ...config, models: config.models.filter(m => m.name !== name) });
       onMessage?.('success', '已删除');
-    } catch (e) {
-      onMessage?.('error', '网络错误：' + (e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   // ─── 模型用途配置 ───
 
   async function handleModelSettingChange(role: 'main_model' | 'title_model', alias: string) {
-    const body = { [role]: alias || null };
-    setBusy(true);
-    try {
-      const res = await fetch('/api/config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (data.error) {
-        onMessage?.('error', data.error);
-        return;
-      }
+    await run(async () => {
+      await apiPut('/api/config', { [role]: alias || null });
       onConfigChange({ ...config, [role]: alias || null });
-    } catch (e) {
-      onMessage?.('error', '网络错误：' + (e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   // ─── 渲染 ───
@@ -262,7 +164,7 @@ export function ModelSettings({ config, onConfigChange, onMessage }: ModelSettin
               <label>类型</label>
               <select
                 value={providerDraft.client_type ?? 'openai'}
-                onChange={e => setProviderDraft({ ...providerDraft, client_type: e.target.value as any })}
+                onChange={e => setProviderDraft({ ...providerDraft, client_type: e.target.value as APIProvider['client_type'] })}
               >
                 {CLIENT_TYPE_OPTIONS.map(o => (
                   <option key={o.value} value={o.value}>{o.label}</option>
@@ -493,7 +395,7 @@ function ProviderRow({
       </div>
       <div className="form-row">
         <label>类型</label>
-        <select value={draft.client_type} onChange={e => setDraft({ ...draft, client_type: e.target.value as any })}>
+        <select value={draft.client_type} onChange={e => setDraft({ ...draft, client_type: e.target.value as APIProvider['client_type'] })}>
           {CLIENT_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </div>

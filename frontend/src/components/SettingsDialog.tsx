@@ -5,13 +5,9 @@ import { AgentManager } from './AgentManager';
 import { AppearanceSettings } from './AppearanceSettings';
 import { ModelSettings } from './ModelSettings';
 import { SecuritySettings } from './SecuritySettings';
-import type { AppearanceConfig, APIProvider, ModelInfo } from '../types';
+import type { AppearanceConfig, ModelConfig } from '../types';
 
-interface ConfigData {
-  providers: APIProvider[];
-  models: ModelInfo[];
-  main_model: string;
-  title_model: string | null;
+interface ConfigData extends ModelConfig {
   host: string;
   port: number;
   yolo_mode?: boolean;
