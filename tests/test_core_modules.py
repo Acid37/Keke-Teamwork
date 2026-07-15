@@ -413,6 +413,20 @@ class EditToolTests(IsolatedAsyncioTestCase):
         # 应保留原始 CRLF 行尾
         self.assertIn(b"a\r\nb", content)
 
+    async def test_crlf_preserved_after_edit(self) -> None:
+        """🔒 回归守卫: edit.py 必须用 newline='' 打开文件, 否则此测试在 Linux 上失败。
+
+        为什么: Python 默认文本模式会 \\r\\n→\\n, 导致 CRLF 文件被悄悄转成 LF。
+        没有 newline='' 时, Windows 上看似正常(写出时自动补 \\r), 但 Linux CI 直接炸。
+        """
+        (self._work_dir / "crlf.py").write_bytes(b"foo\r\nbar\r\n")
+        ok, _ = await self._run_edit("crlf.py", "foo", "X")
+        self.assertTrue(ok)
+        raw = (self._work_dir / "crlf.py").read_bytes()
+        # 关键断言: 无论什么平台, CRLF 必须原样保留
+        self.assertEqual(raw, b"X\r\nbar\r\n",
+                         "缺少 newline='' 会导致 CRLF 被转成 LF")
+
     async def test_lf_file_matches_crlf_old_text(self) -> None:
         """LF 文件用 CRLF 搜索文本也能匹配。"""
         (self._work_dir / "lf.py").write_bytes(b"line1\nline2\n")

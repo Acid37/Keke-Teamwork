@@ -34,7 +34,11 @@ class EditTool(Tool):
             if not file_path.is_file():
                 return (False, f"不是一个文件: {file_path}")
 
-            # Read current content (newline='' preserves original line endings)
+            # Read current content.
+            #
+            # ⚠️  newline='' 是必须的：默认文本模式会把 \r\n → \n（通用换行转换），
+            # 导致 CRLF 检测永远为 False + 写出时平台行尾不一致。
+            # 测试守卫: tests/test_core_modules.py::test_crlf_preserved_after_edit
             try:
                 with open(file_path, "r", encoding="utf-8", newline="") as f:
                     content = f.read()
