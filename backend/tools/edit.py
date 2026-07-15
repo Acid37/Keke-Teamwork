@@ -34,13 +34,13 @@ class EditTool(Tool):
             if not file_path.is_file():
                 return (False, f"不是一个文件: {file_path}")
 
-            # Read current content
+            # Read current content (newline='' preserves original line endings)
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
+                with open(file_path, "r", encoding="utf-8", newline="") as f:
                     content = f.read()
             except UnicodeDecodeError:
                 try:
-                    with open(file_path, "r", encoding="latin-1") as f:
+                    with open(file_path, "r", encoding="latin-1", newline="") as f:
                         content = f.read()
                 except Exception as e:
                     return (False, f"读取文件错误: {e}")
@@ -74,11 +74,11 @@ class EditTool(Tool):
                 # Perform replacement
                 new_content = content.replace(old_text, new_text, 1)
 
-            # Write the file
+            # Write the file (newline='' writes exactly as-is, no platform translation)
             if hasattr(self._ctx, "staging") and self._ctx.staging:
                 self._ctx.staging.stage_write(file_path, new_content)
             else:
-                with open(file_path, "w", encoding="utf-8") as f:
+                with open(file_path, "w", encoding="utf-8", newline="") as f:
                     f.write(new_content)
 
             return (True, f"Edited: {path_str} (1 replacement)")
