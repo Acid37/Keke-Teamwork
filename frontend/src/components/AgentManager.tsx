@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Trash2, Edit3, Save, X, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
-import type { AgentDefinition, ToolInfo } from '../types';
+import { Plus, Trash2, Edit3, Save, X, ChevronDown, ChevronUp, Loader2, Shield } from 'lucide-react';
+import type { AgentDefinition, AgentPermissions, ToolInfo } from '../types';
 
 const COLOR_PRESETS = [
   '#4a9eff', '#7c3aed', '#10b981', '#f59e0b', '#ef4444',
@@ -44,6 +44,14 @@ export function AgentManager({ models, onFetchModels, loadingModels }: AgentMana
   const [formMaxContext, setFormMaxContext] = useState<number | ''>('');
   const [formColor, setFormColor] = useState(COLOR_PRESETS[0]);
 
+  // Permission form state
+  const [formAllowedPaths, setFormAllowedPaths] = useState('');
+  const [formDeniedPaths, setFormDeniedPaths] = useState('');
+  const [formMaxCommandRisk, setFormMaxCommandRisk] = useState<string>('dangerous');
+  const [formAllowDelegation, setFormAllowDelegation] = useState(true);
+  const [formAllowHandoff, setFormAllowHandoff] = useState(true);
+  const [showPerms, setShowPerms] = useState(false);
+
   const fetchAgents = useCallback(async () => {
     try {
       const res = await fetch('/api/agents');
@@ -83,6 +91,12 @@ export function AgentManager({ models, onFetchModels, loadingModels }: AgentMana
     setFormMaxRounds(50);
     setFormMaxContext('');
     setFormColor(COLOR_PRESETS[0]);
+    setFormAllowedPaths('');
+    setFormDeniedPaths('');
+    setFormMaxCommandRisk('dangerous');
+    setFormAllowDelegation(true);
+    setFormAllowHandoff(true);
+    setShowPerms(false);
   }
 
   function startCreate() {
@@ -105,6 +119,13 @@ export function AgentManager({ models, onFetchModels, loadingModels }: AgentMana
     setFormMaxRounds(agent.max_tool_rounds);
     setFormMaxContext(agent.max_context ?? '');
     setFormColor(agent.color);
+    const perms = agent.permissions;
+    setFormAllowedPaths(perms?.allowed_paths?.join('\n') || '');
+    setFormDeniedPaths(perms?.denied_paths?.join('\n') || '');
+    setFormMaxCommandRisk(perms?.max_command_risk || 'dangerous');
+    setFormAllowDelegation(perms?.allow_delegation ?? true);
+    setFormAllowHandoff(perms?.allow_handoff ?? true);
+    setShowPerms(perms != null);
     setEditing(agent);
     setIsCreating(false);
     setError('');
@@ -135,7 +156,7 @@ export function AgentManager({ models, onFetchModels, loadingModels }: AgentMana
 
     setSaving(true);
     try {
-      const body = {
+      const body: Record<string, unknown> = {
         agent_id: formId.trim(),
         name: formName.trim(),
         role: formRole,
@@ -148,6 +169,21 @@ export function AgentManager({ models, onFetchModels, loadingModels }: AgentMana
         max_context: formMaxContext === '' ? null : formMaxContext,
         color: formColor,
       };
+
+      // Include permissions if enabled
+      if (showPerms) {
+        const allowed = formAllowedPaths.trim() ? formAllowedPaths.trim().split('\n').map(s => s.trim()).filter(Boolean) : null;
+        const denied = formDeniedPaths.trim() ? formDeniedPaths.trim().split('\n').map(s => s.trim()).filter(Boolean) : null;
+        body.permissions = {
+          allowed_paths: allowed,
+          denied_paths: denied,
+          max_command_risk: formMaxCommandRisk,
+          allow_delegation: formAllowDelegation,
+          allow_handoff: formAllowHandoff,
+        };
+      } else {
+        body.permissions = null;
+      }
 
       const url = isCreating ? '/api/agents' : `/api/agents/${formId}`;
       const method = isCreating ? 'POST' : 'PUT';
@@ -437,6 +473,77 @@ export function AgentManager({ models, onFetchModels, loadingModels }: AgentMana
                 rows={6}
               />
             </div>
+
+            {/* Permissions */}
+            <div className="settings-field">
+              <label className="perm-toggle-label">
+                <input
+                  type="checkbox"
+                  checked={showPerms}
+                  onChange={(e) => setShowPerms(e.target.checked)}
+                />
+                <Shield size={14} />
+                <span>自定义权限策略</span>
+                <span className="optional">（关闭使用默认）</span>
+              </label>
+            </div>
+
+            {showPerms && (
+              <div className="perm-section">
+                <div className="settings-field">
+                  <label>命令风险预算</label>
+                  <select
+                    value={formMaxCommandRisk}
+                    onChange={(e) => setFormMaxCommandRisk(e.target.value)}
+                  >
+                    <option value="read_only">仅只读命令</option>
+                    <option value="normal">普通命令（默认审批）</option>
+                    <option value="dangerous">无限制（含高危命令）</option>
+                  </select>
+                </div>
+
+                <div className="settings-field">
+                  <label>允许路径 <span className="optional">（每行一个 glob，留空 = 全部允许）</span></label>
+                  <textarea
+                    className="perm-paths-input"
+                    value={formAllowedPaths}
+                    onChange={(e) => setFormAllowedPaths(e.target.value)}
+                    placeholder={"src/**\ntests/**"}
+                    rows={3}
+                  />
+                </div>
+
+                <div className="settings-field">
+                  <label>拒绝路径 <span className="optional">（优先级高于允许路径）</span></label>
+                  <textarea
+                    className="perm-paths-input"
+                    value={formDeniedPaths}
+                    onChange={(e) => setFormDeniedPaths(e.target.value)}
+                    placeholder={"**/*.secret.*\nconfig/**"}
+                    rows={3}
+                  />
+                </div>
+
+                <div className="perm-checks">
+                  <label className="perm-check">
+                    <input
+                      type="checkbox"
+                      checked={formAllowDelegation}
+                      onChange={(e) => setFormAllowDelegation(e.target.checked)}
+                    />
+                    <span>允许委派给其他 Agent</span>
+                  </label>
+                  <label className="perm-check">
+                    <input
+                      type="checkbox"
+                      checked={formAllowHandoff}
+                      onChange={(e) => setFormAllowHandoff(e.target.checked)}
+                    />
+                    <span>允许被其他 Agent Handoff</span>
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="agent-form-footer">

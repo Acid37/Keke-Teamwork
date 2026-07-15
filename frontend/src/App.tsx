@@ -4,6 +4,7 @@ import { SessionList } from './components/SessionList'
 import { ChatArea } from './components/ChatArea'
 import { MessageInput } from './components/MessageInput'
 import { ToastProvider } from './components/Toast'
+import { SetupWizard } from './components/SetupWizard'
 import { applyTheme, setupAutoModeListener } from './theme'
 import type { AppearanceConfig } from './types'
 
@@ -24,6 +25,8 @@ function App() {
   // image is fetched even when the path is the same (`/api/wallpaper`).
   const [wallpaperVersion, setWallpaperVersion] = useState(0)
   const [wallpaperType, setWallpaperType] = useState<'image' | 'video' | 'none'>('none')
+  const [showSetupWizard, setShowSetupWizard] = useState(false)
+  const [checkingSetup, setCheckingSetup] = useState(true)
 
   // Load appearance config on mount
   useEffect(() => {
@@ -45,6 +48,17 @@ function App() {
         if (data) setWallpaperType(data.wallpaper_type || 'none')
       })
       .catch(() => {})
+
+    // Check if setup wizard is needed
+    fetch('/api/setup/status')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && !data.setup_completed) {
+          setShowSetupWizard(true)
+        }
+      })
+      .catch(() => {})
+      .finally(() => setCheckingSetup(false))
   }, [])
 
   // Set up auto-mode listener for system preference changes
@@ -83,6 +97,13 @@ function App() {
   return (
     <ToastProvider>
       <SessionProvider>
+        {/* Setup Wizard — shown on first run before main UI */}
+        {!checkingSetup && (
+          <SetupWizard
+            open={showSetupWizard}
+            onComplete={() => setShowSetupWizard(false)}
+          />
+        )}
         <div className={`app-container${wallpaperUrl ? ' has-wallpaper' : ''}`}>
           {/* Wallpaper background layer (fades in on change) */}
           {wallpaperUrl && wallpaperType === 'image' && (

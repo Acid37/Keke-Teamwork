@@ -4,6 +4,7 @@ import { X, Loader2 } from 'lucide-react';
 import { AgentManager } from './AgentManager';
 import { AppearanceSettings } from './AppearanceSettings';
 import { ModelSettings } from './ModelSettings';
+import { SecuritySettings } from './SecuritySettings';
 import type { AppearanceConfig, APIProvider, ModelInfo } from '../types';
 
 interface ConfigData {
@@ -13,6 +14,12 @@ interface ConfigData {
   title_model: string | null;
   host: string;
   port: number;
+  yolo_mode?: boolean;
+  auto_review?: boolean;
+  solo_mode?: boolean;
+  console_timeout?: number;
+  console_max_output?: number;
+  max_parallel_researchers?: number;
 }
 
 interface SettingsDialogProps {
@@ -22,12 +29,13 @@ interface SettingsDialogProps {
   onAppearanceChange: (config: AppearanceConfig) => void;
 }
 
-type TabId = 'model' | 'agents' | 'appearance';
+type TabId = 'model' | 'agents' | 'appearance' | 'security';
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'model', label: '模型' },
   { id: 'agents', label: 'Agent 管理' },
   { id: 'appearance', label: '外观' },
+  { id: 'security', label: '安全' },
 ];
 
 export function SettingsDialog({ open, onClose, appearance, onAppearanceChange }: SettingsDialogProps) {
@@ -55,6 +63,12 @@ export function SettingsDialog({ open, onClose, appearance, onAppearanceChange }
         title_model: data.title_model ?? null,
         host: data.host,
         port: data.port,
+        yolo_mode: data.yolo_mode ?? false,
+        auto_review: data.auto_review ?? true,
+        solo_mode: data.solo_mode ?? false,
+        console_timeout: data.console_timeout ?? 30,
+        console_max_output: data.console_max_output ?? 200,
+        max_parallel_researchers: data.max_parallel_researchers ?? 6,
       });
     } catch {
       showToast('error', '加载配置失败');
@@ -154,6 +168,13 @@ export function SettingsDialog({ open, onClose, appearance, onAppearanceChange }
             <AppearanceSettings
               config={appearance}
               onChange={onAppearanceChange}
+            />
+          )}
+          {activeTab === 'security' && (
+            <SecuritySettings
+              config={config}
+              onConfigChange={handleConfigChange}
+              onMessage={showToast}
             />
           )}
         </div>

@@ -1,4 +1,12 @@
 // Agent definition types (mirrors backend AgentDefinition)
+export interface AgentPermissions {
+  allowed_paths: string[] | null;
+  denied_paths: string[] | null;
+  max_command_risk: 'read_only' | 'normal' | 'dangerous';
+  allow_delegation: boolean;
+  allow_handoff: boolean;
+}
+
 export interface AgentDefinition {
   agent_id: string;
   name: string;
@@ -12,6 +20,7 @@ export interface AgentDefinition {
   max_context: number | null;
   color: string;
   description: string;
+  permissions: AgentPermissions | null;
 }
 
 // ─── 多 provider / 多 model ───

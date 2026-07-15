@@ -86,8 +86,16 @@ class AppConfig:
     # ─── 研究 ───
     max_parallel_researchers: int = 6
 
+    # ─── 安全默认值 ───
+    yolo_mode: bool = False
+    auto_review: bool = True
+    solo_mode: bool = False
+
     # ─── 路径 ───
     data_dir: Path = field(default_factory=lambda: Path.home() / ".keke-teamwork")
+
+    # ─── 首次运行 ───
+    setup_completed: bool = False
 
     # ───────────────────────────────────────────
     # 加载 / 保存
@@ -308,8 +316,12 @@ class AppConfig:
             "console_timeout": self.console_timeout,
             "console_max_output": self.console_max_output,
             "max_parallel_researchers": self.max_parallel_researchers,
+            "yolo_mode": self.yolo_mode,
+            "auto_review": self.auto_review,
+            "solo_mode": self.solo_mode,
             "providers": [p.to_dict(mask_key=True) for p in self.providers],
             "models": [m.to_dict() for m in self.models],
+            "setup_completed": self.setup_completed,
         }
 
     @staticmethod

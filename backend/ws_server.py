@@ -134,9 +134,12 @@ class WebSocketServer:
             """
             body = await request.json()
             updates = {}
-            for key in ("provider", "base_url", "main_model", "title_model"):
+            for key in ("provider", "base_url", "main_model", "title_model",
+                        "yolo_mode", "auto_review", "solo_mode",
+                        "console_timeout", "console_max_output",
+                        "max_parallel_researchers"):
                 if key in body:
-                    updates[key] = body[key] or None
+                    updates[key] = body[key] if body[key] is not None else None
             # API key: only update if user provided a new one (not masked)
             if "api_key" in body:
                 new_key = body["api_key"]
@@ -647,6 +650,20 @@ class WebSocketServer:
         @app.get("/health")
         async def health():
             return {"status": "ok"}
+
+        # ─── Setup Wizard ───
+
+        @app.get("/api/setup/status")
+        async def setup_status():
+            """Check if setup wizard has been completed."""
+            return {"setup_completed": self._config.setup_completed}
+
+        @app.post("/api/setup/complete")
+        async def setup_complete():
+            """Mark setup wizard as completed."""
+            self._config.setup_completed = True
+            self._config.save()
+            return {"status": "ok", "setup_completed": True}
 
         # ─── Work directory picker ───
 

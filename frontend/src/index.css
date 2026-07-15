@@ -3601,3 +3601,361 @@ body {
   color: var(--text-muted);
   font-size: 0.875rem;
 }
+
+/* ===== Setup Wizard ===== */
+
+.setup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(6px);
+}
+
+.setup-dialog {
+  width: 560px;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  padding: 2rem;
+}
+
+.setup-header {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.setup-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--accent);
+}
+
+.setup-logo h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.setup-subtitle {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  margin-top: 8px;
+}
+
+.setup-steps {
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.setup-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.setup-step.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.setup-step.done {
+  color: var(--success);
+}
+
+.setup-step-number {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--bg-tertiary);
+  border: 2px solid var(--border);
+  flex-shrink: 0;
+}
+
+.setup-step.active .setup-step-number {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.setup-step.done .setup-step-number {
+  background: var(--success);
+  border-color: var(--success);
+  color: #fff;
+}
+
+.setup-body h3 {
+  font-size: 1.125rem;
+  margin-bottom: 0.5rem;
+}
+
+.setup-hint {
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  margin-bottom: 1rem;
+}
+
+.provider-preset-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.provider-preset-card {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  text-align: left;
+}
+
+.provider-preset-card:hover {
+  border-color: var(--accent);
+}
+
+.provider-preset-card.active {
+  border-color: var(--accent);
+  background: rgba(74, 158, 255, 0.08);
+}
+
+.provider-preset-name {
+  font-weight: 600;
+  font-size: 0.875rem;
+  margin-bottom: 4px;
+}
+
+.provider-preset-url {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+.api-key-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0 12px;
+}
+
+.api-key-input-wrap input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 10px 0;
+  font-family: var(--font-mono);
+  outline: none;
+  color: var(--text-primary);
+}
+
+.api-key-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.model-select-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.model-select-row select {
+  flex: 1;
+}
+
+.role-overview-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.role-overview-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+.role-overview-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  flex-shrink: 0;
+  font-size: 18px;
+}
+
+.role-overview-card strong {
+  display: block;
+  font-size: 0.875rem;
+  margin-bottom: 2px;
+}
+
+.role-overview-card p {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.setup-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.setup-footer-spacer {
+  flex: 1;
+}
+
+.setup-finish-btn {
+  gap: 8px;
+}
+
+/* ===== Security Settings ===== */
+
+.security-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.security-card {
+  padding: 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.security-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.security-card-header > svg:first-child {
+  color: var(--accent);
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.security-card-header h4 {
+  font-size: 0.875rem;
+  margin: 0 0 2px;
+}
+
+.security-desc {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.security-card-header .toggle-btn {
+  flex-shrink: 0;
+  margin-left: auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0;
+  transition: color 0.15s;
+}
+
+.security-card-header .toggle-btn.active {
+  color: var(--accent);
+}
+
+.security-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: rgba(245, 158, 11, 0.1);
+  border-radius: var(--radius-md);
+  font-size: 0.75rem;
+  color: #f59e0b;
+}
+
+/* ===== Permissions Section in Agent Form ===== */
+
+.perm-toggle-label {
+  display: flex !important;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.perm-toggle-label input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+
+.perm-section {
+  margin-top: 8px;
+  padding: 12px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.perm-paths-input {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.perm-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.perm-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.perm-check input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}

@@ -42,15 +42,17 @@
 - [x] `EditTool` 精确替换、重复匹配、换行兼容、权限集成、staging 集成（12 个测试）
 - [x] `PermissionManager` 审批流程、超时、拒绝、风险预算（19 个测试）
 
-### P1：Setup Wizard
+### P1：Setup Wizard ✅
 
-- [ ] 首次启动引导：API key 配置 → 模型选择 → 默认角色确认
-- [ ] 检测是否首次运行（无 config.json / agents.json）
+- [x] 首次启动引导：API key 配置 → 模型选择 → 默认角色确认
+- [x] 检测是否首次运行（`setup_completed` 字段）
+- [x] 向导完成后自动创建 provider + model 配置
 
-### P1：GUI 优化
+### P1：GUI 优化 ✅
 
-- [ ] 设置弹窗分区 Tab：模型 / Agent / 工具权限 / 安全
-- [ ] Agent 编辑面板增加权限配置 UI
+- [x] 设置弹窗分区 Tab：模型 / Agent / 外观 / **安全**
+- [x] Agent 编辑面板增加**权限配置 UI**（路径约束、风险预算、委派开关）
+- [x] 安全设置页：YOLO 模式 / 自动审查 / Solo 模式全局开关
 
 ---
 
