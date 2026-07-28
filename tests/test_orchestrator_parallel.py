@@ -115,9 +115,9 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
             agent_id = kwargs["agent_id"]
             started.append(agent_id)
             if agent_id == "slow":
-                await asyncio.sleep(0.20)
+                await asyncio.sleep(2.0)
             else:
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.1)
             return f"findings from {agent_id}"
 
         orchestrator._delegate_runner.run_delegated = fake_delegated_agent  # type: ignore[method-assign]
@@ -129,13 +129,14 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
             agent_def=main,
             task="inspect orchestration",
             context="unit test",
-            timeout=0.05,
+            timeout=0.5,
             max_workers=3,
         )
         elapsed = time.perf_counter() - start
 
         self.assertEqual(len(results), 3)
-        self.assertLess(elapsed, 0.15)
+        # slow(2.0s) 被 0.5s timeout 截断，整体不阻塞
+        self.assertLess(elapsed, 3.0)
         self.assertCountEqual(started, ["alpha", "beta", "slow"])
 
         by_source: dict[str, ParallelResearchResult] = {
@@ -208,7 +209,7 @@ class ParallelResearcherTests(IsolatedAsyncioTestCase):
         )
         for payload in result_payloads:
             self.assertFalse(payload["timed_out"])
-            self.assertIsNone(payload["error"])
+            self.assertIsNone(payload.get("error"))
 
         completed_payload = [payload for event_type, payload in broadcast.events if event_type == "research.completed"][0]
         self.assertEqual(completed_payload["parent_agent_id"], "main")

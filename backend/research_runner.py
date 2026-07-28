@@ -8,6 +8,12 @@ from collections.abc import Awaitable, Callable
 
 from backend.config import AppConfig
 from backend.delegate_runner import DelegateRunner
+from backend.events import (
+    ResearchCompletedEvent,
+    ResearchFailedEvent,
+    ResearchResultEvent,
+    ResearchStartedEvent,
+)
 from backend.tools import is_read_only_tool_set
 from backend.types import AgentDefinition, MergedResearchResult, ParallelResearchResult, Session
 
@@ -56,15 +62,15 @@ class ResearchRunner:
             max_workers=max_workers or self._config.max_parallel_researchers,
         )
         merged = self.merge(results)
-        await broadcast("research.completed", {
-            "parent_agent_id": agent_def.agent_id,
-            "task": task,
-            "merged_text": merged.text,
-            "successful_sources": merged.successful_sources,
-            "timed_out_sources": merged.timed_out_sources,
-            "errored_sources": merged.errored_sources,
-            "result_count": len(results),
-        })
+        await ResearchCompletedEvent(
+            parent_agent_id=agent_def.agent_id,
+            task=task,
+            merged_text=merged.text,
+            successful_sources=merged.successful_sources,
+            timed_out_sources=merged.timed_out_sources,
+            errored_sources=merged.errored_sources,
+            result_count=len(results),
+        ).emit(broadcast)
         return merged
 
     async def run_researchers(
@@ -92,14 +98,13 @@ class ResearchRunner:
 
         async def run_one(researcher: AgentDefinition) -> ParallelResearchResult:
             async with semaphore:
-                base_payload = {
-                    "agent_id": researcher.agent_id,
-                    "agent_name": researcher.name,
-                    "role": researcher.role,
-                    "parent_agent_id": agent_def.agent_id,
-                    "task": task,
-                }
-                await broadcast("research.started", base_payload)
+                await ResearchStartedEvent(
+                    agent_id=researcher.agent_id,
+                    agent_name=researcher.name,
+                    role=researcher.role,
+                    parent_agent_id=agent_def.agent_id,
+                    task=task,
+                ).emit(broadcast)
                 try:
                     result_text = await asyncio.wait_for(
                         self._delegate_runner.run_delegated(
@@ -112,12 +117,15 @@ class ResearchRunner:
                         ),
                         timeout=timeout,
                     )
-                    await broadcast("research.result", {
-                        **base_payload,
-                        "text": result_text,
-                        "timed_out": False,
-                        "error": None,
-                    })
+                    await ResearchResultEvent(
+                        agent_id=researcher.agent_id,
+                        agent_name=researcher.name,
+                        role=researcher.role,
+                        parent_agent_id=agent_def.agent_id,
+                        task=task,
+                        text=result_text,
+                        timed_out=False,
+                    ).emit(broadcast)
                     return ParallelResearchResult(
                         text=result_text,
                         metadata={
@@ -128,12 +136,16 @@ class ResearchRunner:
                         },
                     )
                 except asyncio.TimeoutError:
-                    await broadcast("research.failed", {
-                        **base_payload,
-                        "text": "",
-                        "timed_out": True,
-                        "error": "timed out",
-                    })
+                    await ResearchFailedEvent(
+                        agent_id=researcher.agent_id,
+                        agent_name=researcher.name,
+                        role=researcher.role,
+                        parent_agent_id=agent_def.agent_id,
+                        task=task,
+                        text="",
+                        timed_out=True,
+                        error="timed out",
+                    ).emit(broadcast)
                     return ParallelResearchResult(
                         text="",
                         metadata={
@@ -145,12 +157,16 @@ class ResearchRunner:
                         error="timed out",
                     )
                 except Exception as exc:
-                    await broadcast("research.failed", {
-                        **base_payload,
-                        "text": "",
-                        "timed_out": False,
-                        "error": str(exc),
-                    })
+                    await ResearchFailedEvent(
+                        agent_id=researcher.agent_id,
+                        agent_name=researcher.name,
+                        role=researcher.role,
+                        parent_agent_id=agent_def.agent_id,
+                        task=task,
+                        text="",
+                        timed_out=False,
+                        error=str(exc),
+                    ).emit(broadcast)
                     return ParallelResearchResult(
                         text="",
                         metadata={

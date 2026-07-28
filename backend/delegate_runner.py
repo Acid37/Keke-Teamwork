@@ -8,6 +8,16 @@ from uuid import uuid4
 
 from backend.agent import Agent
 from backend.config import AppConfig
+from backend.events import (
+    AgentCompletedEvent,
+    AgentStartedEvent,
+    AgentTextEvent,
+    AgentThinkingEvent,
+    HandoffCompletedEvent,
+    HandoffFailedEvent,
+    HandoffStartedEvent,
+    ToolCallEvent,
+)
 from backend.model_resolver import ModelResolver
 from backend.prompt_builder import build_delegated_system_prompt, build_handoff_system_prompt
 from backend.safety.file_staging import FileStagingArea
@@ -44,9 +54,10 @@ class DelegateRunner:
         agent_tools = resolve_tools([n for n in agent_def.tools if n in _READ_ONLY_TOOLS]) or resolve_tools(_READ_ONLY_TOOLS)
 
         aid, aname, arole, acolor = agent_def.agent_id, agent_def.name, agent_def.role, agent_def.color
-        await broadcast("agent.started", {
-            "agent_id": aid, "agent_name": aname, "role": arole, "color": acolor,
-            "parent_agent_id": parent_agent_id, "delegated": True})
+        await AgentStartedEvent(
+            agent_id=aid, agent_name=aname, role=arole, color=acolor,
+            parent_agent_id=parent_agent_id, delegated=True,
+        ).emit(broadcast)
 
         child_context = ToolContext(
             session=session, work_dir=session.work_dir, staging=None,
@@ -81,11 +92,14 @@ class DelegateRunner:
         agent_tools = resolve_tools([n for n in agent_def.tools if n != "delegate_agent"])
 
         aid, aname, arole, acolor = agent_def.agent_id, agent_def.name, agent_def.role, agent_def.color
-        base_payload = {"agent_id": aid, "agent_name": aname, "role": arole,
-                        "parent_agent_id": parent_agent_id, "task": task}
-        await broadcast("handoff.started", base_payload)
-        await broadcast("agent.started", {
-            **base_payload, "color": acolor, "delegated": True, "handoff": True})
+        await HandoffStartedEvent(
+            agent_id=aid, agent_name=aname, role=arole,
+            parent_agent_id=parent_agent_id, task=task,
+        ).emit(broadcast)
+        await AgentStartedEvent(
+            agent_id=aid, agent_name=aname, role=arole, color=acolor,
+            parent_agent_id=parent_agent_id, delegated=True, handoff=True,
+        ).emit(broadcast)
 
         child_context = ToolContext(
             session=session, work_dir=session.work_dir, staging=staging,
@@ -101,12 +115,15 @@ class DelegateRunner:
             "Do not delegate further.")
 
         async def _on_handoff_failed(exc):
-            await broadcast("handoff.failed", {**base_payload, "error": str(exc)})
+            await HandoffFailedEvent(
+                agent_id=aid, agent_name=aname, role=arole,
+                parent_agent_id=parent_agent_id, task=task, error=str(exc),
+            ).emit(broadcast)
 
         result = await self._run_child(
             session, broadcast, agent_def, agent_tools, child_context, user_msg,
             parent_agent_id, aid, aname, arole, acolor,
-            build_handoff_system_prompt, extra_completed=base_payload, handoff=True,
+            build_handoff_system_prompt, extra_completed=task, handoff=True,
             on_error=_on_handoff_failed)
 
         return self.format_delegate_result(agent_def, result)
@@ -146,13 +163,15 @@ class DelegateRunner:
             result = await agent.run(
                 user_message=user_msg, tool_context=child_context, existing_messages=None,
                 max_tool_rounds=agent_def.max_tool_rounds, context_limit=context_limit,
-                on_text=lambda t: broadcast("agent.text", {
-                    "text": t, "source": arole, "is_final": False, "agent_id": aid,
-                    "agent_name": aname, "role": arole, "color": acolor,
-                    "parent_agent_id": parent_agent_id}),
-                on_thinking=lambda t: broadcast("agent.thinking", {
-                    "text": t, "source": arole, "agent_id": aid,
-                    "agent_name": aname, "parent_agent_id": parent_agent_id}),
+                on_text=lambda t: AgentTextEvent(
+                    text=t, source=arole, is_final=False, agent_id=aid,
+                    agent_name=aname, role=arole, color=acolor,
+                    parent_agent_id=parent_agent_id,
+                ).emit(broadcast),
+                on_thinking=lambda t: AgentThinkingEvent(
+                    text=t, source=arole, agent_id=aid,
+                    agent_name=aname, parent_agent_id=parent_agent_id,
+                ).emit(broadcast),
                 on_tool_call=bc_tool_call, on_tool_result=bc_tool_result)
         except Exception as exc:
             if on_error:
@@ -165,22 +184,26 @@ class DelegateRunner:
             raise RuntimeError(result.error)
 
         session.usage_total += result.usage
-        completed_payload = {
-            "agent_id": aid, "agent_name": aname, "role": arole,
-            "summary": result.text[:200] if result.text else "",
-            "usage": {"input_tokens": result.usage.input_tokens,
-                      "output_tokens": result.usage.output_tokens},
-            "parent_agent_id": parent_agent_id, "delegated": True}
-        if handoff:
-            completed_payload["handoff"] = True
-        await broadcast("agent.completed", completed_payload)
+        await AgentCompletedEvent(
+            agent_id=aid, agent_name=aname, role=arole,
+            summary=result.text[:200] if result.text else "",
+            usage={"input_tokens": result.usage.input_tokens,
+                   "output_tokens": result.usage.output_tokens},
+            parent_agent_id=parent_agent_id, delegated=True,
+            handoff=True if handoff else None,
+        ).emit(broadcast)
 
         if extra_completed and handoff:
-            await broadcast("handoff.completed", {**extra_completed, "text": result.text})
+            await HandoffCompletedEvent(
+                agent_id=aid, agent_name=aname, role=arole,
+                parent_agent_id=parent_agent_id, task=extra_completed,
+                text=result.text,
+            ).emit(broadcast)
 
-        await broadcast("agent.text", {
-            "text": "", "source": arole, "is_final": True,
-            "agent_id": aid, "agent_name": aname, "parent_agent_id": parent_agent_id})
+        await AgentTextEvent(
+            text="", source=arole, is_final=True,
+            agent_id=aid, agent_name=aname, parent_agent_id=parent_agent_id,
+        ).emit(broadcast)
 
         return result
 
@@ -192,16 +215,18 @@ class DelegateRunner:
         async def broadcast_tool_call(name: str, args: dict):
             call_id = uuid4().hex[:8]
             tool_call_ids.setdefault(name, []).append(call_id)
-            await broadcast("tool.call", {
-                "name": name, "args": args, "stage": "running", "source": agent_role,
-                "call_id": call_id, "agent_id": agent_id, "parent_agent_id": parent_agent_id})
+            await ToolCallEvent(
+                name=name, args=args, stage="running", source=agent_role,
+                call_id=call_id, agent_id=agent_id, parent_agent_id=parent_agent_id,
+            ).emit(broadcast)
 
         async def broadcast_tool_result(name: str, success: bool, result: str):
             call_id = tool_call_ids.get(name, []).pop(0) if tool_call_ids.get(name) else uuid4().hex[:8]
-            await broadcast("tool.call", {
-                "name": name, "args": {"result": result}, "stage": "completed",
-                "source": agent_role, "call_id": call_id, "success": success,
-                "agent_id": agent_id, "parent_agent_id": parent_agent_id})
+            await ToolCallEvent(
+                name=name, args={"result": result}, stage="completed",
+                source=agent_role, call_id=call_id, success=success,
+                agent_id=agent_id, parent_agent_id=parent_agent_id,
+            ).emit(broadcast)
 
         return broadcast_tool_call, broadcast_tool_result
 

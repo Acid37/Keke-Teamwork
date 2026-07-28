@@ -194,6 +194,7 @@ export interface FilesChangedPayload {
 export interface ApprovalRequestPayload {
   request_id: string;
   command: string;
+  risk_level?: string;
   timeout_seconds: number;
 }
 

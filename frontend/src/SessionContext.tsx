@@ -5,29 +5,14 @@ import {
   SessionInfo,
   Phase,
   ToolCallInfo,
-  AgentTextPayload,
-  AgentThinkingPayload,
-  AgentStatusPayload,
-  AgentStartedPayload,
-  AgentCompletedPayload,
-  ResearchStartedPayload,
-  ResearchResultPayload,
-  ResearchCompletedPayload,
-  HandoffStartedPayload,
-  HandoffCompletedPayload,
-  HandoffFailedPayload,
-  ToolCallPayload,
-  ConsoleOutputPayload,
   FilesChangedPayload,
   ApprovalRequestPayload,
-  ErrorPayload,
-  SessionReadyPayload,
-  SessionListPayload,
   WSCommand,
   ActiveAgent,
 } from './types';
+import { registerEventHandlers } from './eventHandlers';
 
-interface SessionState {
+export interface SessionState {
   sessionId: string | null;
   phase: Phase;
   messages: Message[];
@@ -51,7 +36,7 @@ function loadRecentProjects(): string[] {
   try { return JSON.parse(localStorage.getItem('ct-recent-projects') || '[]'); } catch { return []; }
 }
 
-type Action =
+export type Action =
   | { type: 'SET_SESSION'; sessionId: string; title: string; phase: string; history?: Message[]; workDir?: string; autoReview?: boolean; yoloMode?: boolean; soloMode?: boolean }
   | { type: 'ADD_MESSAGE'; message: Message }
   | { type: 'UPDATE_MESSAGE'; messageId: string; content: string }
@@ -97,17 +82,13 @@ const initialState: SessionState = {
   pendingApproval: null,
 };
 
-function generateId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-}
-
 function normalizeHistory(history: any[] | undefined): Message[] {
   if (!history) return [];
   return history
     .filter((item) => item?.role === 'user' || item?.role === 'assistant')
     .filter((item) => typeof item.content === 'string' && item.content.trim().length > 0)
     .map((item) => ({
-      id: item.id || generateId(),
+      id: item.id || (Date.now().toString(36) + Math.random().toString(36).slice(2, 8)),
       role: item.role,
       content: item.content,
       source: item.source,
@@ -119,18 +100,6 @@ function normalizeHistory(history: any[] | undefined): Message[] {
       thinking: item.thinking,
       timestamp: typeof item.timestamp === 'number' ? item.timestamp : Date.now(),
     }));
-}
-
-function addSystemMessage(dispatch: React.Dispatch<Action>, content: string): void {
-  dispatch({
-    type: 'ADD_MESSAGE',
-    message: {
-      id: generateId(),
-      role: 'system',
-      content,
-      timestamp: Date.now(),
-    },
-  });
 }
 
 function reducer(state: SessionState, action: Action): SessionState {
@@ -345,9 +314,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     const ws = new WSClient();
     wsRef.current = ws;
 
+    // 连接状态
     ws.on('open', () => {
       dispatch({ type: 'SET_CONNECTED', connected: true });
-      // Request session list on connect
       ws.send({ type: 'session.list' });
     });
 
@@ -355,266 +324,17 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       dispatch({ type: 'SET_CONNECTED', connected: false });
     });
 
-    ws.on('session.list', (payload: SessionListPayload) => {
-      dispatch({ type: 'SET_SESSIONS', sessions: payload.sessions });
-    });
-
-    ws.on('session.title.updated', (payload: { session_id: string; title: string }) => {
-      dispatch({ type: 'UPDATE_SESSION_TITLE', sessionId: payload.session_id, title: payload.title });
-    });
-
-    ws.on('session.ready', (payload: SessionReadyPayload) => {
-      dispatch({
-        type: 'SET_SESSION',
-        sessionId: payload.session_id,
-        title: payload.title,
-        phase: payload.phase,
-        history: payload.history,
-        workDir: payload.work_dir,
-        autoReview: payload.auto_review,
-        yoloMode: payload.yolo_mode,
-        soloMode: payload.solo_mode,
-      });
-      dispatch({ type: 'SET_PROCESSING', isProcessing: false });
-      ws.send({ type: 'session.list' });
-      // Persist recent projects
-      const wd = payload.work_dir;
-      if (wd) {
-        try {
-          const prev = JSON.parse(localStorage.getItem('ct-recent-projects') || '[]');
-          const next = [wd, ...prev.filter((p: string) => p !== wd)].slice(0, 10);
-          localStorage.setItem('ct-recent-projects', JSON.stringify(next));
-          dispatch({ type: 'SET_RECENT_PROJECTS', projects: next });
-        } catch {}
-      }
-    });
-
-    ws.on('agent.text', (payload: AgentTextPayload) => {
-      const current = stateRef.current;
-
-      if (current.streamingMessageId) {
-        // Append to existing streaming message
-        dispatch({ type: 'APPEND_MESSAGE', messageId: current.streamingMessageId, text: payload.text });
-      } else {
-        // Create new assistant message with agent identity
-        const id = generateId();
-        dispatch({
-          type: 'ADD_MESSAGE',
-          message: {
-            id,
-            role: 'assistant',
-            content: payload.text,
-            source: payload.source,
-            agent_id: payload.agent_id,
-            agent_name: payload.agent_name,
-            agent_color: payload.color,
-            timestamp: Date.now(),
-          },
-        });
-        dispatch({ type: 'SET_STREAMING_ID', messageId: id });
-      }
-
-      dispatch({ type: 'SET_PROCESSING', isProcessing: true });
-
-      if (payload.is_final) {
-        dispatch({ type: 'SET_STREAMING_ID', messageId: null });
-        dispatch({ type: 'SET_PROCESSING', isProcessing: false });
-      }
-    });
-
-    ws.on('agent.thinking', (payload: AgentThinkingPayload) => {
-      const current = stateRef.current;
-      let targetId = current.streamingMessageId;
-
-      if (!targetId) {
-        const id = generateId();
-        dispatch({
-          type: 'ADD_MESSAGE',
-          message: {
-            id,
-            role: 'assistant',
-            content: '',
-            source: payload.source,
-            thinking: '',
-            timestamp: Date.now(),
-          },
-        });
-        dispatch({ type: 'SET_STREAMING_ID', messageId: id });
-        targetId = id;
-      }
-
-      dispatch({ type: 'ADD_THINKING', messageId: targetId, text: payload.text });
-    });
-
-    ws.on('agent.status', (payload: AgentStatusPayload) => {
-      dispatch({ type: 'SET_PHASE', phase: payload.phase as Phase });
-
-      if (payload.phase === 'ready') {
-        dispatch({ type: 'SET_PROCESSING', isProcessing: false });
-        dispatch({ type: 'SET_STREAMING_ID', messageId: null });
-      } else {
-        dispatch({ type: 'SET_PROCESSING', isProcessing: true });
-      }
-    });
-
-    ws.on('tool.call', (payload: ToolCallPayload) => {
-      const current = stateRef.current;
-      let targetId = current.streamingMessageId;
-
-      if (!targetId) {
-        const id = generateId();
-        dispatch({
-          type: 'ADD_MESSAGE',
-          message: {
-            id,
-            role: 'assistant',
-            content: '',
-            source: payload.source,
-            timestamp: Date.now(),
-          },
-        });
-        dispatch({ type: 'SET_STREAMING_ID', messageId: id });
-        targetId = id;
-      }
-
-      if (payload.stage === 'running') {
-        dispatch({
-          type: 'ADD_TOOL_CALL',
-          messageId: targetId,
-          toolCall: {
-            name: payload.name,
-            args: payload.args,
-            call_id: payload.call_id,
-            stage: 'running',
-          },
-        });
-      } else {
-        dispatch({
-          type: 'UPDATE_TOOL_CALL',
-          messageId: targetId,
-          callId: payload.call_id,
-          updates: { stage: 'completed', result: payload.args?.result },
-        });
-      }
-    });
-
-    ws.on('console.output', (payload: ConsoleOutputPayload) => {
-      const current = stateRef.current;
-      // Find the message containing this tool call
-      for (const msg of current.messages) {
-        if (msg.tool_calls?.some((tc) => tc.call_id === payload.call_id)) {
-          dispatch({
-            type: 'UPDATE_TOOL_CALL',
-            messageId: msg.id,
-            callId: payload.call_id,
-            updates: {
-              console_output: (
-                (msg.tool_calls.find((tc) => tc.call_id === payload.call_id)?.console_output || '') +
-                payload.output
-              ),
-            },
-          });
-          break;
-        }
-      }
-    });
-
-    ws.on('files.changed', (payload: FilesChangedPayload) => {
-      const current = stateRef.current;
-      let targetId = current.streamingMessageId;
-
-      if (!targetId) {
-        const id = generateId();
-        dispatch({
-          type: 'ADD_MESSAGE',
-          message: {
-            id,
-            role: 'assistant',
-            content: '',
-            timestamp: Date.now(),
-          },
-        });
-        targetId = id;
-      }
-
-      dispatch({ type: 'ADD_FILE_CHANGES', messageId: targetId, changes: payload });
-    });
-
-    ws.on('approval.request', (payload: ApprovalRequestPayload) => {
-      dispatch({ type: 'SET_PENDING_APPROVAL', approval: payload });
-    });
-
-    ws.on('agent.started', (payload: AgentStartedPayload) => {
-      dispatch({
-        type: 'AGENT_STARTED',
-        agent: {
-          agent_id: payload.agent_id,
-          agent_name: payload.agent_name,
-          role: payload.role,
-          color: payload.color,
-          status: 'running',
-        },
-      });
-    });
-
-    ws.on('agent.completed', (payload: AgentCompletedPayload) => {
-      dispatch({ type: 'AGENT_COMPLETED', agentId: payload.agent_id });
-    });
-
-    ws.on('research.started', (payload: ResearchStartedPayload) => {
-      addSystemMessage(dispatch, `Researcher ${payload.agent_name} 开始研究：${payload.task}`);
-    });
-
-    ws.on('research.result', (payload: ResearchResultPayload) => {
-      const text = payload.text?.trim() || '(无文本结果)';
-      addSystemMessage(dispatch, `Researcher ${payload.agent_name} 返回结果：\n\n${text}`);
-    });
-
-    ws.on('research.failed', (payload: ResearchResultPayload) => {
-      const reason = payload.timed_out ? '超时' : (payload.error || '未知错误');
-      addSystemMessage(dispatch, `Researcher ${payload.agent_name} 失败：${reason}`);
-    });
-
-    ws.on('research.completed', (payload: ResearchCompletedPayload) => {
-      const status = [
-        `完成 ${payload.result_count} 个 researcher`,
-        payload.successful_sources.length ? `成功：${payload.successful_sources.join(', ')}` : '',
-        payload.timed_out_sources.length ? `超时：${payload.timed_out_sources.join(', ')}` : '',
-        payload.errored_sources.length ? `异常：${payload.errored_sources.join(', ')}` : '',
-      ].filter(Boolean).join('；');
-      addSystemMessage(dispatch, `并行研究完成：${status}\n\n${payload.merged_text}`);
-    });
-
-    ws.on('handoff.started', (payload: HandoffStartedPayload) => {
-      addSystemMessage(dispatch, `${payload.agent_name} 开始执行 handoff：${payload.task}`);
-    });
-
-    ws.on('handoff.completed', (payload: HandoffCompletedPayload) => {
-      const text = payload.text?.trim() || '(无文本结果)';
-      addSystemMessage(dispatch, `${payload.agent_name} 完成 handoff：\n\n${text}`);
-    });
-
-    ws.on('handoff.failed', (payload: HandoffFailedPayload) => {
-      addSystemMessage(dispatch, `${payload.agent_name} handoff 失败：${payload.error || '未知错误'}`);
-    });
-
-    ws.on('error', (payload: ErrorPayload) => {
-      dispatch({
-        type: 'ADD_MESSAGE',
-        message: {
-          id: generateId(),
-          role: 'system',
-          content: `Error: ${payload.message}`,
-          timestamp: Date.now(),
-        },
-      });
-      dispatch({ type: 'SET_PROCESSING', isProcessing: false });
-      dispatch({ type: 'SET_STREAMING_ID', messageId: null });
+    // 注册所有业务事件 handler（从 eventHandlers.ts 导入）
+    const unregister = registerEventHandlers(ws, {
+      dispatch,
+      getState: () => stateRef.current,
+      wsSend: (cmd) => ws.send(cmd as WSCommand),
     });
 
     ws.connect();
 
     return () => {
+      unregister();
       ws.disconnect();
     };
   }, []);
