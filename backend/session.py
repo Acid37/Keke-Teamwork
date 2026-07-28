@@ -85,6 +85,7 @@ class SessionStore:
             "title": session.title,
             "created_at": session.created_at,
             "last_active_at": session.last_active_at,
+            "events": session.events,
         }
 
     @staticmethod
@@ -106,6 +107,7 @@ class SessionStore:
             title=data.get("title", ""),
             created_at=data.get("created_at", 0),
             last_active_at=data.get("last_active_at", 0),
+            events=data.get("events", []),
         )
 
     # ─── Atomic write ───

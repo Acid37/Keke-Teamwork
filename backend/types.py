@@ -125,6 +125,7 @@ class Session:
     title: str = ""
     created_at: float = 0.0
     last_active_at: float = 0.0
+    events: list[dict] = field(default_factory=list)  # 持久化的 timeline 事件
 
     def __post_init__(self):
         now = time.time()

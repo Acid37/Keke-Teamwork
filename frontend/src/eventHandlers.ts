@@ -9,7 +9,7 @@
  */
 
 import type { Dispatch } from 'react';
-import type { Message, ToolCallInfo } from './types';
+import type { Message, ToolCallInfo, TimelineEvent, PersistedTimelineEvent } from './types';
 import type { Action, SessionState } from './SessionContext';
 import type { EventMap, EventType } from './generated/events';
 
@@ -26,6 +26,17 @@ function addSystemMessage(dispatch: Dispatch<Action>, content: string): void {
       id: generateId(),
       role: 'system',
       content,
+      timestamp: Date.now(),
+    },
+  });
+}
+
+function addTimelineEvent(dispatch: Dispatch<Action>, event: Omit<TimelineEvent, 'id' | 'timestamp'>): void {
+  dispatch({
+    type: 'ADD_TIMELINE_EVENT',
+    event: {
+      ...event,
+      id: generateId(),
       timestamp: Date.now(),
     },
   });
@@ -80,6 +91,31 @@ const onSessionReady: Handler<'session.ready'> = (ctx, p) => {
   ctx.dispatch({ type: 'SET_PROCESSING', isProcessing: false });
   ctx.wsSend({ type: 'session.list' });
 
+  // 从持久化事件恢复 timeline
+  const persisted = (p as unknown as { timeline_events?: PersistedTimelineEvent[] }).timeline_events;
+  if (persisted && persisted.length > 0) {
+    const restored: TimelineEvent[] = persisted.map((e) => {
+      const pl = e.payload || {};
+      return {
+        id: generateId(),
+        type: e.type,
+        agent_id: pl.agent_id ?? pl.parent_agent_id ?? '',
+        agent_name: pl.agent_name ?? pl.parent_agent_id ?? '',
+        agent_color: pl.color,
+        role: pl.role,
+        parent_agent_id: pl.parent_agent_id,
+        task: pl.task,
+        text: pl.text ?? pl.merged_text,
+        error: pl.error,
+        timed_out: pl.timed_out,
+        timestamp: (e.timestamp ?? Date.now()) * 1000,
+      };
+    });
+    ctx.dispatch({ type: 'SET_TIMELINE_EVENTS', events: restored });
+  } else {
+    ctx.dispatch({ type: 'CLEAR_TIMELINE' });
+  }
+
   // 持久化 recent projects
   if (p.work_dir) {
     try {
@@ -122,6 +158,14 @@ const onAgentStarted: Handler<'agent.started'> = (ctx, p) => {
       status: 'running',
     },
   });
+  addTimelineEvent(ctx.dispatch, {
+    type: 'agent.started',
+    agent_id: p.agent_id,
+    agent_name: p.agent_name,
+    agent_color: p.color,
+    role: p.role,
+    parent_agent_id: p.parent_agent_id ?? undefined,
+  });
 };
 
 const onAgentText: Handler<'agent.text'> = (ctx, p) => {
@@ -163,6 +207,13 @@ const onAgentThinking: Handler<'agent.thinking'> = (ctx, p) => {
 
 const onAgentCompleted: Handler<'agent.completed'> = (ctx, p) => {
   ctx.dispatch({ type: 'AGENT_COMPLETED', agentId: p.agent_id });
+  addTimelineEvent(ctx.dispatch, {
+    type: 'agent.completed',
+    agent_id: p.agent_id,
+    agent_name: p.agent_name,
+    role: p.role,
+    parent_agent_id: p.parent_agent_id ?? undefined,
+  });
 };
 
 // ─── 工具调用 ───
@@ -233,42 +284,88 @@ const onFilesChanged: Handler<'files.changed'> = (ctx, p) => {
 // ─── 并行研究 ───
 
 const onResearchStarted: Handler<'research.started'> = (ctx, p) => {
-  addSystemMessage(ctx.dispatch, `Researcher ${p.agent_name} 开始研究：${p.task}`);
+  addTimelineEvent(ctx.dispatch, {
+    type: 'research.started',
+    agent_id: p.agent_id,
+    agent_name: p.agent_name,
+    role: p.role,
+    parent_agent_id: p.parent_agent_id,
+    task: p.task,
+  });
 };
 
 const onResearchResult: Handler<'research.result'> = (ctx, p) => {
-  const text = p.text?.trim() || '(无文本结果)';
-  addSystemMessage(ctx.dispatch, `Researcher ${p.agent_name} 返回结果：\n\n${text}`);
+  addTimelineEvent(ctx.dispatch, {
+    type: 'research.result',
+    agent_id: p.agent_id,
+    agent_name: p.agent_name,
+    role: p.role,
+    parent_agent_id: p.parent_agent_id,
+    task: p.task,
+    text: p.text,
+    timed_out: p.timed_out,
+  });
 };
 
 const onResearchFailed: Handler<'research.failed'> = (ctx, p) => {
-  const reason = p.timed_out ? '超时' : (p.error || '未知错误');
-  addSystemMessage(ctx.dispatch, `Researcher ${p.agent_name} 失败：${reason}`);
+  addTimelineEvent(ctx.dispatch, {
+    type: 'research.failed',
+    agent_id: p.agent_id,
+    agent_name: p.agent_name,
+    role: p.role,
+    parent_agent_id: p.parent_agent_id,
+    task: p.task,
+    error: p.error ?? undefined,
+    timed_out: p.timed_out,
+  });
 };
 
 const onResearchCompleted: Handler<'research.completed'> = (ctx, p) => {
-  const status = [
-    `完成 ${p.result_count} 个 researcher`,
-    p.successful_sources.length ? `成功：${p.successful_sources.join(', ')}` : '',
-    p.timed_out_sources.length ? `超时：${p.timed_out_sources.join(', ')}` : '',
-    p.errored_sources.length ? `异常：${p.errored_sources.join(', ')}` : '',
-  ].filter(Boolean).join('；');
-  addSystemMessage(ctx.dispatch, `并行研究完成：${status}\n\n${p.merged_text}`);
+  addTimelineEvent(ctx.dispatch, {
+    type: 'research.completed',
+    agent_id: p.parent_agent_id,
+    agent_name: p.parent_agent_id,
+    parent_agent_id: p.parent_agent_id,
+    task: p.task,
+    text: `成功: ${p.successful_sources.join(', ') || '无'} | 超时: ${p.timed_out_sources.join(', ') || '无'} | 异常: ${p.errored_sources.join(', ') || '无'}\n\n${p.merged_text}`,
+  });
 };
 
 // ─── Handoff ───
 
 const onHandoffStarted: Handler<'handoff.started'> = (ctx, p) => {
-  addSystemMessage(ctx.dispatch, `${p.agent_name} 开始执行 handoff：${p.task}`);
+  addTimelineEvent(ctx.dispatch, {
+    type: 'handoff.started',
+    agent_id: p.agent_id,
+    agent_name: p.agent_name,
+    role: p.role,
+    parent_agent_id: p.parent_agent_id,
+    task: p.task,
+  });
 };
 
 const onHandoffCompleted: Handler<'handoff.completed'> = (ctx, p) => {
-  const text = p.text?.trim() || '(无文本结果)';
-  addSystemMessage(ctx.dispatch, `${p.agent_name} 完成 handoff：\n\n${text}`);
+  addTimelineEvent(ctx.dispatch, {
+    type: 'handoff.completed',
+    agent_id: p.agent_id,
+    agent_name: p.agent_name,
+    role: p.role,
+    parent_agent_id: p.parent_agent_id,
+    task: p.task,
+    text: p.text,
+  });
 };
 
 const onHandoffFailed: Handler<'handoff.failed'> = (ctx, p) => {
-  addSystemMessage(ctx.dispatch, `${p.agent_name} handoff 失败：${p.error || '未知错误'}`);
+  addTimelineEvent(ctx.dispatch, {
+    type: 'handoff.failed',
+    agent_id: p.agent_id,
+    agent_name: p.agent_name,
+    role: p.role,
+    parent_agent_id: p.parent_agent_id,
+    task: p.task,
+    error: p.error,
+  });
 };
 
 // ─── 审批 ───

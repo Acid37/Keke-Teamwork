@@ -109,6 +109,8 @@ class SessionReadyEvent(WSEvent):
     auto_review: bool = True
     yolo_mode: bool = False
     solo_mode: bool = False
+    usage: dict | None = None
+    timeline_events: list[dict] = field(default_factory=list)
 
 
 @dataclass

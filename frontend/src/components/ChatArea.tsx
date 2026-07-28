@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSession } from '../SessionContext';
 import { MessageBubble } from './MessageBubble';
+import { Timeline } from './Timeline';
 import { DirectoryPicker } from './DirectoryPicker';
 import { ApprovalDialog } from './ApprovalDialog';
 import { Loader2, FolderOpen, Folder, Shield, Zap, User } from 'lucide-react';
@@ -12,7 +13,7 @@ export function ChatArea() {
   const toast = useToast();
   const [showDirPicker, setShowDirPicker] = useState(false);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [state.messages]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [state.messages, state.timelineEvents]);
 
   function toggleMode(mode: 'auto_review' | 'yolo' | 'solo') {
     const map: any = {
@@ -100,6 +101,10 @@ export function ChatArea() {
           {state.phase === 'thinking' && <span>正在规划方案...</span>}
           {state.phase === 'coding' && <span>正在编写代码...</span>}
         </div>
+      )}
+
+      {state.timelineEvents.length > 0 && (
+        <Timeline events={state.timelineEvents} />
       )}
 
       {state.messages.map((message) => {

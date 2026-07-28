@@ -1007,8 +1007,22 @@ class WebSocketServer:
         agent_id: str = "main",
     ) -> None:
         """Process a user message through the orchestrator."""
+        # 持久化的 timeline 事件类型集合
+        _TIMELINE_EVENT_TYPES = {
+            "research.started", "research.result", "research.failed",
+            "research.completed", "handoff.started", "handoff.completed",
+            "handoff.failed", "agent.started", "agent.completed",
+        }
+
         async def broadcast(event_type: str, payload: dict):
             await self._send(ws, event_type, payload)
+            # 持久化 timeline 事件到 session
+            if event_type in _TIMELINE_EVENT_TYPES:
+                session.events.append({
+                    "type": event_type,
+                    "payload": payload,
+                    "timestamp": time.time(),
+                })
 
         try:
             await self._orchestrator.run_user_message(
@@ -1080,6 +1094,7 @@ class WebSocketServer:
                 "input_tokens": session.usage_total.input_tokens,
                 "output_tokens": session.usage_total.output_tokens,
             },
+            "timeline_events": session.events,
         })
 
 # ─── ASGI entry points ─────────────────────────────────────────────

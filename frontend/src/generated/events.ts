@@ -39,6 +39,8 @@ export interface SESSION_READYPayload {
   auto_review: boolean;
   yolo_mode: boolean;
   solo_mode: boolean;
+  usage?: Record<string, unknown> | null;
+  timeline_events: Record<string, unknown>[];
 }
 
 export interface SESSION_LISTPayload {

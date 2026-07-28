@@ -81,6 +81,15 @@ export interface SessionReadyPayload {
   auto_review?: boolean;
   yolo_mode?: boolean;
   solo_mode?: boolean;
+  usage?: { input_tokens: number; output_tokens: number };
+  timeline_events?: PersistedTimelineEvent[];
+}
+
+/** 后端持久化的 timeline 事件格式（session.events 数组元素） */
+export interface PersistedTimelineEvent {
+  type: TimelineEventType;
+  payload: Record<string, any>;
+  timestamp: number;
 }
 
 export interface SessionListPayload {
@@ -244,6 +253,34 @@ export interface SessionInfo {
 }
 
 export type Phase = 'init' | 'researching' | 'thinking' | 'coding' | 'ready' | 'error';
+
+// ─── 结构化时间线事件 ───
+
+export type TimelineEventType =
+  | 'research.started'
+  | 'research.result'
+  | 'research.failed'
+  | 'research.completed'
+  | 'handoff.started'
+  | 'handoff.completed'
+  | 'handoff.failed'
+  | 'agent.started'
+  | 'agent.completed';
+
+export interface TimelineEvent {
+  id: string;
+  type: TimelineEventType;
+  agent_id: string;
+  agent_name: string;
+  agent_color?: string;
+  role?: string;
+  parent_agent_id?: string;
+  task?: string;
+  text?: string;
+  error?: string;
+  timed_out?: boolean;
+  timestamp: number;
+}
 
 // Appearance configuration (mirrors backend AppearanceConfig)
 export interface AppearanceConfig {

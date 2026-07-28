@@ -9,6 +9,7 @@ import {
   ApprovalRequestPayload,
   WSCommand,
   ActiveAgent,
+  TimelineEvent,
 } from './types';
 import { registerEventHandlers } from './eventHandlers';
 
@@ -29,6 +30,7 @@ export interface SessionState {
   yoloMode: boolean;
   soloMode: boolean;
   pendingApproval: ApprovalRequestPayload | null;
+  timelineEvents: TimelineEvent[];
 }
 
 // Try-expr for localStorage init
@@ -61,7 +63,10 @@ export type Action =
   | { type: 'SET_AUTO_REVIEW'; enabled: boolean }
   | { type: 'SET_YOLO_MODE'; enabled: boolean }
   | { type: 'SET_SOLO_MODE'; enabled: boolean }
-  | { type: 'SET_PENDING_APPROVAL'; approval: ApprovalRequestPayload | null };
+  | { type: 'SET_PENDING_APPROVAL'; approval: ApprovalRequestPayload | null }
+  | { type: 'ADD_TIMELINE_EVENT'; event: TimelineEvent }
+  | { type: 'SET_TIMELINE_EVENTS'; events: TimelineEvent[] }
+  | { type: 'CLEAR_TIMELINE' };
 
 const initialState: SessionState = {
   sessionId: null,
@@ -80,6 +85,7 @@ const initialState: SessionState = {
   yoloMode: false,
   soloMode: false,
   pendingApproval: null,
+  timelineEvents: [],
 };
 
 function normalizeHistory(history: any[] | undefined): Message[] {
@@ -242,7 +248,7 @@ function reducer(state: SessionState, action: Action): SessionState {
       return { ...state, recentProjects: action.projects };
 
     case 'RESET_SESSION':
-      return { ...state, sessionId: null, messages: [], streamingMessageId: null, currentToolCall: null, isProcessing: false };
+      return { ...state, sessionId: null, messages: [], streamingMessageId: null, currentToolCall: null, isProcessing: false, timelineEvents: [] };
 
     case 'SET_AUTO_REVIEW':
       return { ...state, autoReview: action.enabled };
@@ -255,6 +261,15 @@ function reducer(state: SessionState, action: Action): SessionState {
 
     case 'SET_PENDING_APPROVAL':
       return { ...state, pendingApproval: action.approval };
+
+    case 'ADD_TIMELINE_EVENT':
+      return { ...state, timelineEvents: [...state.timelineEvents, action.event] };
+
+    case 'SET_TIMELINE_EVENTS':
+      return { ...state, timelineEvents: action.events };
+
+    case 'CLEAR_TIMELINE':
+      return { ...state, timelineEvents: [] };
 
     default:
       return state;
