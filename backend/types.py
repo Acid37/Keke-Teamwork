@@ -100,12 +100,28 @@ class Checkpoint:
 # ─── 会话 ───
 
 class Phase(str, Enum):
+    """会话阶段。
+
+    既有阶段（v0.2-0.3）保留向后兼容：
+    - INIT / RESEARCHING / THINKING / CODING / READY / ERROR
+
+    v0.4 工作流引擎新增阶段：
+    - PLANNING / PLAN_REVIEW / CODE_REVIEW / REVIEWING / FEEDBACK / COMPLETED
+    """
+    # 既有阶段
     INIT = "init"
     RESEARCHING = "researching"
     THINKING = "thinking"
     CODING = "coding"
     READY = "ready"
     ERROR = "error"
+    # v0.4 工作流阶段
+    PLANNING = "planning"
+    PLAN_REVIEW = "plan_review"
+    CODE_REVIEW = "code_review"
+    REVIEWING = "reviewing"
+    FEEDBACK = "feedback"
+    COMPLETED = "completed"
 
 
 @dataclass
@@ -126,6 +142,7 @@ class Session:
     created_at: float = 0.0
     last_active_at: float = 0.0
     events: list[dict] = field(default_factory=list)  # 持久化的 timeline 事件
+    workflow_state: Any = None  # WorkflowState | None（避免循环导入）
 
     def __post_init__(self):
         now = time.time()

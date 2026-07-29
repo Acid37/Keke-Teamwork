@@ -13,6 +13,18 @@ from backend.types import Phase, Session, TokenUsage
 logger = logging.getLogger(__name__)
 
 
+def _deserialize_workflow_state(data: dict | None):
+    """安全反序列化 WorkflowState，避免循环导入。"""
+    if not data:
+        return None
+    try:
+        from backend.workflow.types import WorkflowState
+        return WorkflowState.from_dict(data)
+    except Exception as e:
+        logger.warning("Failed to deserialize workflow_state: %s", e)
+        return None
+
+
 class SessionStore:
     """JSON 文件会话持久化。
 
@@ -86,6 +98,12 @@ class SessionStore:
             "created_at": session.created_at,
             "last_active_at": session.last_active_at,
             "events": session.events,
+            "workflow_state": (
+                session.workflow_state.to_dict()
+                if session.workflow_state is not None
+                and hasattr(session.workflow_state, "to_dict")
+                else None
+            ),
         }
 
     @staticmethod
@@ -108,6 +126,7 @@ class SessionStore:
             created_at=data.get("created_at", 0),
             last_active_at=data.get("last_active_at", 0),
             events=data.get("events", []),
+            workflow_state=_deserialize_workflow_state(data.get("workflow_state")),
         )
 
     # ─── Atomic write ───
