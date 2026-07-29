@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from backend.types import AgentDefinition, Session
+from backend.types import AgentDefinition, Phase, Session
 
 
 def _project_context_block(session: Session, *, compact: bool = False) -> str:
@@ -156,3 +156,97 @@ shell 命令必须遵守配置的审批规则。不要将工作委派给其他 A
 - 仅在有用时运行聚焦的验证命令。
 - 总结所做的变更、验证的内容以及任何残留风险。
 """
+
+
+# ─── 阶段感知提示词注入 ───
+
+
+def build_phase_prompt(
+    session: Session,
+    agent_def: AgentDefinition | None,
+    phase: Phase,
+) -> str:
+    """构建阶段感知的系统提示词。
+
+    在 base system prompt 之上，根据当前工作流阶段注入上下文：
+    - PLANNING：引导产出结构化 TaskList
+    - CODING：注入当前 SubTask 详情
+    - REVIEWING：注入待审查的 DiffSet
+    - FEEDBACK：注入审查反馈（供 coder 重试）
+
+    非工作流阶段或缺失 workflow_state 时，返回 base prompt。
+    """
+    base = build_system_prompt(session, agent_def)
+    ws = session.workflow_state
+
+    if phase == Phase.PLANNING:
+        base += (
+            "\n\n当前阶段：需求分析与任务规划。\n"
+            "请将用户需求拆解为结构化的子任务计划。\n"
+            "输出格式要求：先给出方案概述，再列出编号子任务清单。\n"
+            "每个子任务需包含：标题、详细描述、涉及文件、验收标准。\n"
+            "如果识别到风险或依赖，也请一并列出。\n"
+        )
+        return base
+
+    if phase == Phase.CODING:
+        if ws is None or ws.current_task is None:
+            return base
+        task = ws.current_task
+        task_block = (
+            f"\n\n当前阶段：编码实现。\n"
+            f"当前任务：{task.title}\n"
+            f"任务描述：{task.description}\n"
+        )
+        if task.files_involved:
+            task_block += f"涉及文件：{', '.join(task.files_involved)}\n"
+        if task.acceptance_criteria:
+            task_block += f"验收标准：{task.acceptance_criteria}\n"
+        if session.coder_guidance_queue:
+            task_block += (
+                "\n审查反馈（请根据以下反馈修改）：\n"
+                + "\n---\n".join(session.coder_guidance_queue)
+                + "\n"
+            )
+        base += task_block
+        return base
+
+    if phase == Phase.REVIEWING:
+        if ws is None or ws.current_diff_set is None:
+            return base
+        diff = ws.current_diff_set
+        diff_text = diff.combined_diff[:8000] if diff.combined_diff else ""
+        review_block = (
+            f"\n\n当前阶段：代码审查。\n"
+            f"变更摘要：{diff.summary}\n"
+            f"变更文件数：{diff.files_changed}\n"
+        )
+        if diff_text:
+            review_block += f"\n待审查变更（diff）：\n{diff_text}\n"
+        if diff.test_results:
+            review_block += f"\n测试结果：\n{diff.test_results}\n"
+        base += review_block
+        return base
+
+    if phase == Phase.FEEDBACK:
+        if ws is None or ws.last_review_report is None:
+            return base
+        report = ws.last_review_report
+        feedback_block = (
+            f"\n\n当前阶段：根据审查反馈修改代码。\n"
+            f"审查摘要：{report.summary}\n"
+        )
+        for fr in report.file_reviews:
+            if fr.issues:
+                feedback_block += (
+                    f"\n  [{fr.file_path}] ({fr.severity})\n"
+                    f"  问题：{'; '.join(fr.issues)}\n"
+                )
+            if fr.suggestions:
+                feedback_block += (
+                    f"  建议：{'; '.join(fr.suggestions)}\n"
+                )
+        base += feedback_block
+        return base
+
+    return base
