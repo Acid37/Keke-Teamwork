@@ -37,7 +37,7 @@ v0.3 已完成：per-agent 细粒度权限、内置四角色体系（planner/cod
 
 ### 计划支持
 
-按阶段推进（详见 [`docs/ROADMAP.md`](docs/ROADMAP.md)）：
+按阶段推进（详见 [`docs/路线图.md`](docs/路线图.md)）：
 
 | 阶段 | 重点 |
 |---|---|
@@ -103,7 +103,7 @@ Base URL: https://api.deepseek.com
 Model: deepseek-v4-flash
 ```
 
-也可以通过环境变量覆盖配置（`CT_API_KEY` / `CT_BASE_URL` / `CT_MODEL` 等），详见 `docs/architecture.md`。
+也可以通过环境变量覆盖配置（`CT_API_KEY` / `CT_BASE_URL` / `CT_MODEL` 等），详见 `docs/架构设计.md`。
 
 ## 使用方式
 
@@ -131,12 +131,12 @@ Model: deepseek-v4-flash
 ~/.keke-teamwork
 ```
 
-路线图（分阶段），详见 [`docs/roadmap.md`](docs/roadmap.md)。  
-当前迭代待办，详见
+路线图（分阶段），详见 [`docs/路线图.md`](docs/路线图.md)。  
+当前迭代待办，详见 [`docs/sprint/当前迭代.md`](docs/sprint/当前迭代.md)。
 
-项目架构和工具分类等技术细节，详见 [`docs/architecture.md`](docs/architecture.md)。  
-代码规范和架构原则，详见 [`docs/conventions.md`](docs/conventions.md)。  
-开发路线和当前待办，详见 [`docs/roadmap.md`](docs/roadmap.md) 和 [`docs/sprint/current.md`](docs/sprint/current.md)。
+项目架构和工具分类等技术细节，详见 [`docs/架构设计.md`](docs/架构设计.md)。  
+代码规范和架构原则，详见 [`docs/编码规范.md`](docs/编码规范.md)。  
+开发路线和当前待办，详见 [`docs/路线图.md`](docs/路线图.md) 和 [`docs/sprint/当前迭代.md`](docs/sprint/当前迭代.md)。
 
 ## 许可证
 
