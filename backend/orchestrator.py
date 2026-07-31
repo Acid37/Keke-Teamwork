@@ -18,14 +18,14 @@ from backend.config import AppConfig
 from backend.context_builder import build_project_context
 from backend.delegate_runner import DelegateRunner
 from backend.model_resolver import ModelResolver
-from backend.prompt_builder import build_system_prompt
+from backend.prompt_builder import build_phase_prompt, build_system_prompt
 from backend.research_runner import ResearchRunner
 from backend.safety.file_staging import FileStagingArea
 from backend.safety.permission import PermissionManager
 from backend.session import SessionStore
 from backend.title_service import TitleService
 from backend.tools import ALL_TOOLS, has_write_tool, is_read_only_tool_set, resolve_tools
-from backend.types import AgentDefinition, Phase, Session, ToolContext
+from backend.types import AgentDefinition, AgentResult, Phase, Session, ToolContext
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +160,107 @@ class AgentOrchestrator:
             session.phase = Phase.ERROR
             await broadcast("error", {"message": f"Agent error: {e}", "recoverable": True})
             await broadcast("agent.status", {"phase": "error", "detail": str(e)})
+        finally:
+            self._permission_managers.pop(session.id, None)
+
+    # ─── 工作流 Agent 执行 ───
+
+    async def run_workflow_agent(
+        self,
+        *,
+        agent_id: str,
+        session: Session,
+        user_message: str,
+        broadcast: Broadcast,
+        phase: Phase,
+    ) -> tuple[AgentResult, FileStagingArea | None]:
+        """运行工作流中的单个阶段 Agent。
+
+        与 run_user_message 不同，此方法不做并行研究、标题生成等，
+        专注于执行指定 Agent 并返回结果。
+
+        Args:
+            agent_id: Agent ID（planner / coder / reviewer）
+            session: 当前会话
+            user_message: 传递给 Agent 的用户消息
+            broadcast: 广播闭包
+            phase: 当前工作流阶段（用于构建阶段感知提示词）
+
+        Returns:
+            (AgentResult, staging) — staging 在 coder 阶段非 None
+        """
+        agent_def = self._resolve_agent(agent_id)
+        if not agent_def:
+            raise ValueError(f"Agent '{agent_id}' not found")
+
+        aid, aname, arole, acolor = (
+            agent_def.agent_id, agent_def.name, agent_def.role, agent_def.color)
+
+        effective_model = self._model_resolver.resolve_model(agent_def)
+        llm = self._model_resolver.create_llm_for_agent(
+            agent_def, effective_model,
+            agent_def.provider or self._config.provider)
+        context_limit = self._model_resolver.resolve_context_limit(agent_def)
+
+        await broadcast("agent.started", {
+            "agent_id": aid, "agent_name": aname,
+            "role": arole, "color": acolor})
+
+        needs_staging = has_write_tool(agent_def.tools)
+        staging = FileStagingArea(session.work_dir) if needs_staging else None
+
+        permission_mgr = PermissionManager(
+            broadcast=broadcast, yolo_mode=session.yolo_mode)
+        self._permission_managers[session.id] = permission_mgr
+
+        tool_context = self._build_tool_context(
+            session, aid, staging, permission_mgr, broadcast, agent_def)
+        broadcast_tool_call, broadcast_tool_result = _make_tool_broadcasters(
+            aid, arole, broadcast)
+
+        agent = Agent(
+            llm, model=effective_model, temperature=agent_def.temperature,
+            max_tool_rounds=agent_def.max_tool_rounds,
+            agent_id=aid, role=arole, agent_name=aname)
+        agent.tools = resolve_tools(agent_def.tools) if agent_def.tools else ALL_TOOLS
+        agent.system_prompt = build_phase_prompt(session, agent_def, phase)
+
+        try:
+            result = await agent.run(
+                user_message=user_message,
+                tool_context=tool_context,
+                existing_messages=None,
+                max_tool_rounds=agent_def.max_tool_rounds,
+                context_limit=context_limit,
+                on_text=lambda t: broadcast("agent.text", {
+                    "text": t, "source": arole, "is_final": False,
+                    "agent_id": aid, "agent_name": aname,
+                    "role": arole, "color": acolor}),
+                on_thinking=lambda t: broadcast("agent.thinking", {
+                    "text": t, "source": arole,
+                    "agent_id": aid, "agent_name": aname}),
+                on_tool_call=broadcast_tool_call,
+                on_tool_result=broadcast_tool_result,
+            )
+            if result.error:
+                raise RuntimeError(result.error)
+
+            session.usage_total += result.usage
+            await broadcast("agent.completed", {
+                "agent_id": aid, "agent_name": aname, "role": arole,
+                "summary": result.text[:200] if result.text else "",
+                "usage": {"input_tokens": result.usage.input_tokens,
+                          "output_tokens": result.usage.output_tokens}})
+
+            return result, staging
+        except asyncio.CancelledError:
+            if staging:
+                staging.rollback()
+            raise
+        except Exception:
+            if staging:
+                staging.rollback()
+            raise
         finally:
             self._permission_managers.pop(session.id, None)
 

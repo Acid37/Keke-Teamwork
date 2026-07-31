@@ -107,11 +107,32 @@ Model: deepseek-v4-flash
 
 ## 使用方式
 
+### Web UI
+
 1. 打开 Web UI。
-2. 点击“打开项目”，选择一个本地代码目录。
+2. 点击"打开项目"，选择一个本地代码目录。
 3. 在聊天框输入开发任务。
 4. 如果 Agent 需要执行命令，确认审批弹窗。
 5. 如果 Agent 修改了文件，查看自动生成的 diff。
+
+### CLI 工作流（v0.4 新增）
+
+通过命令行触发 Plan → Code → Review 自动闭环：
+
+```text
+# 新建工作流
+python -m backend.cli "实现用户登录功能" --work-dir /path/to/project
+python -m backend.cli "修复 bug" --work-dir . --yolo
+python -m backend.cli "重构模块" --work-dir . --no-auto-review
+
+# 列出可恢复的会话
+python -m backend.cli --list-sessions
+
+# 恢复之前的会话（从上次暂停的阶段继续）
+python -m backend.cli --resume cli-1722345678
+```
+
+工作流会在计划产出后暂停，等待用户确认后继续执行编码和审查。每次阶段转换后自动持久化会话状态，支持进程重启后通过 `--resume` 恢复。
 
 ## 三种运行模式
 
