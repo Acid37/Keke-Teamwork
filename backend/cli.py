@@ -591,6 +591,20 @@ def main() -> None:
     """CLI 入口。"""
     parser = argparse.ArgumentParser(
         description="Keke Teamwork 工作流 CLI——Plan → Code → Review 自动闭环",
+        epilog=(
+            "示例:\n"
+            "  # 新建工作流\n"
+            "  python -m backend.cli \"实现用户登录功能\" --work-dir /path/to/project\n"
+            "  python -m backend.cli \"修复 bug\" --work-dir . --yolo\n"
+            "  python -m backend.cli \"重构模块\" --work-dir . --no-auto-review\n\n"
+            "  # 列出可恢复的会话\n"
+            "  python -m backend.cli --list-sessions\n\n"
+            "  # 恢复之前的会话\n"
+            "  python -m backend.cli --resume cli-1722345678\n\n"
+            "  # 调试模式\n"
+            "  python -m backend.cli \"任务\" -v\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "task",
@@ -629,6 +643,16 @@ def main() -> None:
         action="store_true",
         help="禁用彩色输出（非 TTY 时自动禁用）",
     )
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="启用 DEBUG 级别日志（显示工作流内部状态）",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version="Keke Teamwork CLI v0.4",
+    )
 
     args = parser.parse_args()
 
@@ -636,13 +660,22 @@ def main() -> None:
     if args.no_color:
         set_color_enabled(False)
 
+    # 日志配置
+    log_level = logging.DEBUG if args.verbose else logging.WARNING
     logging.basicConfig(
-        level=logging.WARNING,
+        level=log_level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
 
-    exit_code = asyncio.run(_run_workflow_cli(args))
+    try:
+        exit_code = asyncio.run(_run_workflow_cli(args))
+    except KeyboardInterrupt:
+        print(f"\n\n  {colorize('✗', phase_color('error'))} {bold('用户中断（Ctrl+C）')}")
+        print(f"  {dim('会话状态已自动保存，可通过 --resume 恢复。')}")
+        print()
+        exit_code = 130  # 标准 Ctrl+C 退出码
+
     sys.exit(exit_code)
 
 
