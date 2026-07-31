@@ -310,3 +310,125 @@ class Timer:
         minutes = int(sec // 60)
         seconds = sec % 60
         return f"{minutes}m{seconds:.0f}s"
+
+
+# ─── Spinner 动画 ───
+
+_SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+
+class Spinner:
+    """终端旋转动画，用于 agent 思考时的视觉反馈。
+
+    使用方式::
+
+        spinner = Spinner("思考中")
+        spinner.start()
+        # ... 异步操作 ...
+        spinner.stop()
+
+    在非 TTY 环境下静默无操作。
+    """
+
+    def __init__(self, label: str = "") -> None:
+        self._label = label
+        self._frame_idx = 0
+        self._running = False
+        self._thread = None
+
+    def start(self) -> None:
+        """启动 spinner 后台线程。"""
+        if not should_use_color() or self._running:
+            return
+        self._running = True
+        import threading
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+        self._thread.start()
+
+    def _spin(self) -> None:
+        import time
+        while self._running:
+            frame = _SPINNER_FRAMES[self._frame_idx % len(_SPINNER_FRAMES)]
+            sys.stdout.write(f"\r  {colorize(frame, _CYAN)} {dim(self._label)}")
+            sys.stdout.flush()
+            self._frame_idx += 1
+            time.sleep(0.08)
+
+    def stop(self) -> None:
+        """停止 spinner，清除行。"""
+        if not self._running:
+            return
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=0.2)
+            self._thread = None
+        # 清除 spinner 行
+        sys.stdout.write("\r" + " " * (len(self._label) + 6) + "\r")
+        sys.stdout.flush()
+
+    def update(self, label: str) -> None:
+        """更新 spinner 标签。"""
+        self._label = label
+
+
+# ─── 彩色 Diff 格式化 ───
+
+def format_diff(diff_text: str, max_lines: int = 50) -> str:
+    """将 unified diff 文本格式化为彩色输出。
+
+    红色表示删除行（-），绿色表示新增行（+），灰色表示上下文行（空格）。
+    文件头（--- / +++）用青色高亮。
+
+    Args:
+        diff_text: unified diff 格式文本
+        max_lines: 最多显示的行数（防止输出过长）
+
+    Returns:
+        彩色格式化后的 diff 字符串
+    """
+    if not diff_text:
+        return ""
+
+    lines = diff_text.split("\n")
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        truncated = True
+    else:
+        truncated = False
+
+    formatted = []
+    for line in lines:
+        if line.startswith("---") or line.startswith("+++"):
+            formatted.append(colorize(line, _BRIGHT_CYAN))
+        elif line.startswith("@@"):
+            formatted.append(colorize(line, _MAGENTA))
+        elif line.startswith("-"):
+            formatted.append(colorize(line, _RED))
+        elif line.startswith("+"):
+            formatted.append(colorize(line, _GREEN))
+        else:
+            formatted.append(dim(line))
+
+    result = "\n".join(formatted)
+    if truncated:
+        result += f"\n{dim('...(diff 已截断)')}"
+    return result
+
+
+def format_file_change(file_path: str, action: str) -> str:
+    """格式化单文件变更摘要行。
+
+    Args:
+        file_path: 文件路径
+        action: "create" | "modify" | "delete"
+
+    Returns:
+        彩色格式化的变更摘要
+    """
+    action_config = {
+        "create": (_GREEN, "✦ 新建"),
+        "modify": (_YELLOW, "✎ 修改"),
+        "delete": (_RED, "✗ 删除"),
+    }
+    color, label = action_config.get(action, (_GRAY, action))
+    return f"  {colorize(label, color)} {colorize(file_path, color)}"

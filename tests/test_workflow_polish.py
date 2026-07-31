@@ -409,3 +409,319 @@ class TestToolCallNumbering:
         result = format_tool_call_start("read_file", {"path": "/test"})
         assert "#" not in result
         assert "read_file" in result
+
+
+# ─── undo 命令测试 ───
+
+
+class TestUndoCommand:
+    """undo 命令——回退上一个已完成任务。"""
+
+    async def test_undo_from_code_review(self, runner, session, broadcast_log):
+        """CODE_REVIEW 阶段可以 undo。"""
+        broadcast, calls = broadcast_log
+        session.phase = Phase.CODE_REVIEW
+        session.workflow_state = WorkflowState(
+            task_list=TaskList(
+                tasks=[
+                    SubTask(id="task-1", title="T1", description="D1"),
+                    SubTask(id="task-2", title="T2", description="D2"),
+                ],
+                current_task_index=1,
+            ),
+            current_diff_set=DiffSet(task_id="task-2"),
+            completed_tasks=["task-1"],
+        )
+
+        result = await runner.handle_user_command(session, "undo", broadcast)
+
+        assert result is True
+        assert session.phase == Phase.CODING
+        assert "task-1" not in session.workflow_state.completed_tasks
+        assert session.workflow_state.task_list.current_task_index == 0
+        # 广播应包含撤销信息
+        assert any(
+            "撤销" in c["payload"].get("detail", "")
+            for c in calls
+            if c["type"] == "agent.status"
+        )
+
+    async def test_undo_from_feedback(self, runner, session, broadcast_log):
+        """FEEDBACK 阶段可以 undo。"""
+        broadcast, _ = broadcast_log
+        session.phase = Phase.FEEDBACK
+        session.workflow_state = WorkflowState(
+            task_list=TaskList(
+                tasks=[
+                    SubTask(id="task-1", title="T1", description="D1"),
+                    SubTask(id="task-2", title="T2", description="D2"),
+                ],
+                current_task_index=1,
+            ),
+            current_diff_set=DiffSet(task_id="task-2"),
+            last_review_report=ReviewReport(should_retry=True),
+            completed_tasks=["task-1"],
+            retry_count=1,
+        )
+
+        result = await runner.handle_user_command(session, "undo", broadcast)
+
+        assert result is True
+        assert session.phase == Phase.CODING
+        assert session.workflow_state.retry_count == 0
+        assert session.workflow_state.current_diff_set is None
+        assert session.workflow_state.last_review_report is None
+
+    async def test_undo_invalid_phase(self, runner, session, broadcast_log):
+        """非 CODE_REVIEW / FEEDBACK 阶段 undo 应返回 False。"""
+        broadcast, _ = broadcast_log
+        session.phase = Phase.CODING
+        session.workflow_state = WorkflowState(
+            task_list=TaskList(tasks=[SubTask(id="t1", title="T1", description="D1")]),
+            completed_tasks=["t1"],
+        )
+
+        result = await runner.handle_user_command(session, "undo", broadcast)
+
+        assert result is False
+        assert session.phase == Phase.CODING
+
+    async def test_undo_no_completed_tasks(self, runner, session, broadcast_log):
+        """没有已完成任务时 undo 应返回 False。"""
+        broadcast, _ = broadcast_log
+        session.phase = Phase.CODE_REVIEW
+        session.workflow_state = WorkflowState(
+            task_list=TaskList(tasks=[SubTask(id="t1", title="T1", description="D1")]),
+            completed_tasks=[],
+        )
+
+        result = await runner.handle_user_command(session, "undo", broadcast)
+
+        assert result is False
+
+    async def test_undo_resets_task_status(self, runner, session, broadcast_log):
+        """undo 应将回退的任务状态重置为 pending。"""
+        broadcast, _ = broadcast_log
+        session.phase = Phase.CODE_REVIEW
+        session.workflow_state = WorkflowState(
+            task_list=TaskList(
+                tasks=[
+                    SubTask(id="task-1", title="T1", description="D1"),
+                    SubTask(id="task-2", title="T2", description="D2"),
+                ],
+                current_task_index=1,
+            ),
+            current_diff_set=DiffSet(task_id="task-2"),
+            completed_tasks=["task-1"],
+        )
+        # 模拟 task-1 已标记为 done
+        session.workflow_state.task_list.tasks[0].status = "done"
+
+        result = await runner.handle_user_command(session, "undo", broadcast)
+
+        assert result is True
+        assert session.workflow_state.task_list.tasks[0].status == "pending"
+
+    async def test_undo_clears_guidance_queue(self, runner, session, broadcast_log):
+        """undo 应清空 coder_guidance_queue。"""
+        broadcast, _ = broadcast_log
+        session.phase = Phase.CODE_REVIEW
+        session.workflow_state = WorkflowState(
+            task_list=TaskList(
+                tasks=[
+                    SubTask(id="task-1", title="T1", description="D1"),
+                    SubTask(id="task-2", title="T2", description="D2"),
+                ],
+                current_task_index=1,
+            ),
+            completed_tasks=["task-1"],
+        )
+        session.coder_guidance_queue.append("some guidance")
+
+        result = await runner.handle_user_command(session, "undo", broadcast)
+
+        assert result is True
+        assert len(session.coder_guidance_queue) == 0
+
+    async def test_undo_at_index_zero(self, runner, session, broadcast_log):
+        """current_task_index 为 0 时 undo 应回退到 0（不越界）。"""
+        broadcast, _ = broadcast_log
+        session.phase = Phase.CODE_REVIEW
+        session.workflow_state = WorkflowState(
+            task_list=TaskList(
+                tasks=[SubTask(id="task-1", title="T1", description="D1")],
+                current_task_index=0,
+            ),
+            completed_tasks=["task-1"],
+        )
+
+        result = await runner.handle_user_command(session, "undo", broadcast)
+
+        assert result is True
+        assert session.workflow_state.task_list.current_task_index == 0
+
+
+# ─── files.changed 广播测试 ───
+
+
+class TestFilesChangedBroadcast:
+    """orchestrator 的 files.changed 广播测试。"""
+
+    async def test_broadcasts_files_changed_on_commit(self):
+        """staging 有文件变更时应广播 files.changed。"""
+        from pathlib import Path
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from backend.agent_store import AgentStore
+        from backend.config import AppConfig
+        from backend.orchestrator import AgentOrchestrator
+        from backend.safety.permission import PermissionManager
+        from backend.types import AgentDefinition, AgentResult, FileDiff, Phase, Session, TokenUsage, CommitResult
+
+        config = MagicMock(spec=AppConfig)
+        llm = MagicMock()
+        agent_store = MagicMock(spec=AgentStore)
+        session_store = MagicMock()
+
+        orch = AgentOrchestrator(
+            config=config, llm=llm, agent_store=agent_store,
+            permission_managers={}, session_store=session_store,
+        )
+
+        session = Session(id="test", work_dir=Path("/tmp/test"), phase=Phase.CODING)
+        session.workflow_state = MagicMock()
+        session.workflow_state.task_list = MagicMock()
+        session.workflow_state.task_list.current_task_index = 0
+        session.workflow_state.task_list.total_count = 1
+
+        # Mock agent definition with write tools
+        agent_def = AgentDefinition(
+            agent_id="coder", name="编码师", role="coder",
+            model="test", tools=["write_file", "read_file"],
+        )
+        orch._resolve_agent = MagicMock(return_value=agent_def)
+        orch._model_resolver = MagicMock()
+        orch._model_resolver.resolve_model = MagicMock(return_value="test-model")
+        orch._model_resolver.create_llm_for_agent = MagicMock(return_value=llm)
+        orch._model_resolver.resolve_context_limit = MagicMock(return_value=10000)
+
+        # Mock agent execution
+        agent_result = AgentResult(
+            text="done", thinking="", tool_calls_history=[],
+            usage=TokenUsage(input_tokens=10, output_tokens=5), messages=[],
+        )
+
+        # Mock staging with file changes
+        mock_staging = MagicMock()
+        mock_file_diff = FileDiff(
+            path=Path("src/test.py"), action="create",
+            diff_text="+new code", new_content="new code",
+        )
+        mock_commit = CommitResult(
+            files_changed=1, diffs=[mock_file_diff],
+            combined_diff="+new code", summary="新增文件",
+        )
+        mock_staging.commit.return_value = mock_commit
+
+        broadcast_calls = []
+
+        async def mock_broadcast(event_type, payload):
+            broadcast_calls.append({"type": event_type, "payload": payload})
+
+        with patch("backend.orchestrator.build_phase_prompt", return_value="prompt"), \
+             patch("backend.orchestrator.resolve_tools", return_value=[]), \
+             patch("backend.orchestrator.build_repo_map", return_value=""), \
+             patch("backend.orchestrator.Agent") as mock_agent_cls, \
+             patch("backend.orchestrator.FileStagingArea", return_value=mock_staging), \
+             patch("backend.orchestrator.PermissionManager"), \
+             patch.object(orch, "_build_tool_context", return_value=MagicMock()):
+            mock_agent = MagicMock()
+            mock_agent.run = AsyncMock(return_value=agent_result)
+            mock_agent_cls.return_value = mock_agent
+
+            result, staging = await orch.run_workflow_agent(
+                agent_id="coder", session=session,
+                user_message="test", broadcast=mock_broadcast,
+                phase=Phase.CODING,
+            )
+
+        # 应广播 files.changed
+        files_changed_events = [c for c in broadcast_calls if c["type"] == "files.changed"]
+        assert len(files_changed_events) == 1
+        payload = files_changed_events[0]["payload"]
+        files = payload.get("files", [])
+        assert len(files) == 1
+        assert "test.py" in files[0]["path"]
+        assert files[0]["action"] == "create"
+
+    async def test_no_broadcast_when_no_files_changed(self):
+        """staging 无文件变更时不应广播 files.changed。"""
+        from pathlib import Path
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from backend.config import AppConfig
+        from backend.orchestrator import AgentOrchestrator
+        from backend.types import AgentDefinition, AgentResult, CommitResult, Phase, Session, TokenUsage
+
+        config = MagicMock(spec=AppConfig)
+        llm = MagicMock()
+        agent_store = MagicMock()
+        session_store = MagicMock()
+
+        orch = AgentOrchestrator(
+            config=config, llm=llm, agent_store=agent_store,
+            permission_managers={}, session_store=session_store,
+        )
+
+        session = Session(id="test", work_dir=Path("/tmp/test"), phase=Phase.CODING)
+        session.workflow_state = MagicMock()
+        session.workflow_state.task_list = MagicMock()
+        session.workflow_state.task_list.current_task_index = 0
+        session.workflow_state.task_list.total_count = 1
+
+        agent_def = AgentDefinition(
+            agent_id="coder", name="编码师", role="coder",
+            model="test", tools=["write_file", "read_file"],
+        )
+        orch._resolve_agent = MagicMock(return_value=agent_def)
+        orch._model_resolver = MagicMock()
+        orch._model_resolver.resolve_model = MagicMock(return_value="test-model")
+        orch._model_resolver.create_llm_for_agent = MagicMock(return_value=llm)
+        orch._model_resolver.resolve_context_limit = MagicMock(return_value=10000)
+
+        agent_result = AgentResult(
+            text="done", thinking="", tool_calls_history=[],
+            usage=TokenUsage(input_tokens=10, output_tokens=5), messages=[],
+        )
+
+        # Mock staging with 0 file changes
+        mock_staging = MagicMock()
+        mock_commit = CommitResult(
+            files_changed=0, diffs=[], combined_diff="", summary="无变更",
+        )
+        mock_staging.commit.return_value = mock_commit
+
+        broadcast_calls = []
+
+        async def mock_broadcast(event_type, payload):
+            broadcast_calls.append({"type": event_type, "payload": payload})
+
+        with patch("backend.orchestrator.build_phase_prompt", return_value="prompt"), \
+             patch("backend.orchestrator.resolve_tools", return_value=[]), \
+             patch("backend.orchestrator.build_repo_map", return_value=""), \
+             patch("backend.orchestrator.Agent") as mock_agent_cls, \
+             patch("backend.orchestrator.FileStagingArea", return_value=mock_staging), \
+             patch("backend.orchestrator.PermissionManager"), \
+             patch.object(orch, "_build_tool_context", return_value=MagicMock()):
+            mock_agent = MagicMock()
+            mock_agent.run = AsyncMock(return_value=agent_result)
+            mock_agent_cls.return_value = mock_agent
+
+            await orch.run_workflow_agent(
+                agent_id="coder", session=session,
+                user_message="test", broadcast=mock_broadcast,
+                phase=Phase.CODING,
+            )
+
+        files_changed_events = [c for c in broadcast_calls if c["type"] == "files.changed"]
+        assert len(files_changed_events) == 0

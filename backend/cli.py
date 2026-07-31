@@ -13,6 +13,9 @@
     # 恢复之前的会话
     python -m backend.cli --resume cli-1722345678
 
+    # 交互模式：任意目录输入 keke 唤起，连续任务
+    keke
+
 工作流会在 PLAN_REVIEW 阶段暂停，等待用户确认后继续。
 每次阶段转换后自动持久化会话状态，支持通过 --resume 恢复。
 """
@@ -29,10 +32,13 @@ from pathlib import Path
 from backend.agent_store import AgentStore
 from backend.cli_display import (
     Timer,
+    Spinner,
     banner,
     bold,
     colorize,
     dim,
+    format_diff,
+    format_file_change,
     format_phase_status,
     format_tool_call_result,
     format_tool_call_start,
@@ -75,6 +81,7 @@ def _make_console_broadcast():
         "total_tool_calls": 0,
         "timer": Timer(),
         "total_timer": Timer(),
+        "spinner": None,
     }
     state["total_timer"].start()
 
@@ -85,6 +92,10 @@ def _make_console_broadcast():
 
             # 检测阶段切换，打印横幅
             if phase != state["current_phase"]:
+                # 停止 spinner
+                if state["spinner"]:
+                    state["spinner"].stop()
+                    state["spinner"] = None
                 # 如果上一个阶段有计时，显示耗时
                 if state["current_phase"] and state["agent_active"]:
                     state["timer"].stop()
@@ -103,6 +114,9 @@ def _make_console_broadcast():
             state["agent_active"] = True
             state["tool_call_count"] = 0  # 重置当前 agent 的工具调用计数
             print(f"\n{role_label(role, name)} {dim('启动...')}")
+            # 启动 spinner
+            state["spinner"] = Spinner(f"{name} 思考中...")
+            state["spinner"].start()
 
         elif event_type == "agent.completed":
             name = payload.get("agent_name", "")
@@ -112,6 +126,10 @@ def _make_console_broadcast():
             in_tok = usage.get("input_tokens", 0)
             out_tok = usage.get("output_tokens", 0)
             state["agent_active"] = False
+            # 停止 spinner
+            if state["spinner"]:
+                state["spinner"].stop()
+                state["spinner"] = None
             state["timer"].stop()
 
             label = role_label(role, name)
@@ -130,21 +148,35 @@ def _make_console_broadcast():
             text = payload.get("text", "")
             is_final = payload.get("is_final", False)
             if not is_final:
+                # 停止 spinner，显示文本
+                if state["spinner"]:
+                    state["spinner"].stop()
+                    state["spinner"] = None
                 print(text, end="", flush=True)
 
         elif event_type == "agent.thinking":
             text = payload.get("text", "")
             if text:
+                if state["spinner"]:
+                    state["spinner"].stop()
+                    state["spinner"] = None
                 print(dim(text), end="", flush=True)
 
         elif event_type == "error":
             msg = payload.get("message", "")
+            if state["spinner"]:
+                state["spinner"].stop()
+                state["spinner"] = None
             print(f"\n  {colorize('✗ ERROR', phase_color('error'))} {msg}", file=sys.stderr)
 
         elif event_type == "tool.call":
             name = payload.get("name", "")
             stage = payload.get("stage", "")
             if stage == "running":
+                # 停止 spinner 显示工具调用
+                if state["spinner"]:
+                    state["spinner"].stop()
+                    state["spinner"] = None
                 state["tool_call_count"] += 1
                 state["total_tool_calls"] += 1
                 args = payload.get("args", {})
@@ -156,6 +188,24 @@ def _make_console_broadcast():
             elif stage == "completed":
                 success = payload.get("success", False)
                 print(format_tool_call_result(name, success))
+
+        elif event_type == "files.changed":
+            # 实时 Diff 展示
+            if state["spinner"]:
+                state["spinner"].stop()
+                state["spinner"] = None
+            files = payload.get("files", [])
+            combined_diff = payload.get("combined_diff", "")
+            if files:
+                print(f"\n  {bold('文件变更：')}")
+                for f in files:
+                    path = f.get("path", "")
+                    action = f.get("action", "modify")
+                    print(format_file_change(str(path), action))
+                print()
+            if combined_diff:
+                print(format_diff(combined_diff))
+                print()
 
     return broadcast
 
@@ -355,15 +405,103 @@ async def _run_workflow_cli(args: argparse.Namespace) -> int:
     if args.resume:
         return await _resume_session(args, config)
 
-    # ── 正常新建工作流模式 ──
+    # ── 交互模式 ──
     if not args.task:
-        print(
-            f"  {colorize('✗', phase_color('error'))} 请提供任务描述，或使用 --resume / --list-sessions",
-            file=sys.stderr,
-        )
-        return 1
+        return await _run_interactive_cli(config)
 
     return await _start_new_workflow(args, config)
+
+
+# ─── 交互模式 ───
+
+INTERACTIVE_HELP = """\
+命令:
+  <任务描述>         启动工作流（例: 实现用户登录功能）
+  /workdir <路径>    切换工作目录（默认当前目录，支持 ~）
+  /yolo              切换 YOLO 模式（跳过命令审批）
+  /list              列出可恢复的会话
+  /resume <会话ID>   恢复指定会话
+  /help              显示本帮助
+  exit / quit / q   退出交互模式
+"""
+
+
+def _interactive_args(task: str, work_dir: Path, yolo: bool) -> argparse.Namespace:
+    """构造交互模式参数，复用一次性 CLI 的启动函数。"""
+    return argparse.Namespace(
+        task=task,
+        work_dir=str(work_dir),
+        yolo=yolo,
+        no_auto_review=False,
+        resume=None,
+    )
+
+
+async def _run_interactive_cli(config: AppConfig) -> int:
+    """交互式 REPL——`keke` 不带参数时进入，支持连续任务。
+
+    在任意目录运行 `keke` 即可唤起，直接输入任务描述开始
+    Plan → Code → Review 工作流；任务结束后回到提示符可继续。
+    """
+    work_dir = Path.cwd()
+    yolo = False
+
+    print(f"\n{banner('Keke Teamwork 交互模式')}")
+    print(f"  在任意目录输入 {colorize('keke', phase_color('planning'))} 唤起；直接输入任务描述开始工作流。")
+    print(f"  输入 {colorize('/help', phase_color('planning'))} 查看命令，{colorize('exit', phase_color('planning'))} 退出。")
+    print(f"\n  {bold('工作目录:')} {work_dir}")
+
+    while True:
+        try:
+            line = input(f"\n{colorize('keke', phase_color('planning'))}> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print(f"\n  {dim('再见！')}")
+            return 0
+        if not line:
+            continue
+
+        cmd, _, rest = line.partition(" ")
+
+        if cmd in ("exit", "quit", "q"):
+            print(f"  {dim('再见！')}")
+            return 0
+        elif cmd in ("/help", "help", "h", "?"):
+            print(INTERACTIVE_HELP)
+        elif cmd == "/workdir":
+            new_dir = rest.strip().strip('"').strip("'")
+            if not new_dir:
+                print(f"  当前工作目录: {work_dir}")
+                continue
+            target = Path(new_dir).expanduser().resolve()
+            if target.is_dir():
+                work_dir = target
+                print(f"  {dim('工作目录:')} {bold(str(work_dir))}")
+            else:
+                print(f"  {colorize('✗', phase_color('error'))} 目录不存在: {target}")
+        elif cmd == "/yolo":
+            yolo = not yolo
+            print(f"  YOLO 模式: {colorize('开', phase_color('reviewing')) if yolo else '关'}")
+        elif cmd == "/list":
+            _list_sessions(config)
+        elif cmd == "/resume":
+            sid = rest.strip()
+            if not sid:
+                print(f"  {dim('用法: /resume <会话ID>（可用 /list 查看）')}")
+                continue
+            args = _interactive_args("", work_dir, yolo)
+            args.resume = sid
+            try:
+                await _resume_session(args, config)
+            except KeyboardInterrupt:
+                print(f"\n  {colorize('✗', phase_color('error'))} 已中断恢复")
+        else:
+            args = _interactive_args(line, work_dir, yolo)
+            try:
+                await _start_new_workflow(args, config)
+            except KeyboardInterrupt:
+                print(f"\n  {colorize('✗', phase_color('error'))} 已中断任务；会话已保存，可用 /resume 恢复。")
+
+    return 0
 
 
 async def _start_new_workflow(args: argparse.Namespace, config: AppConfig) -> int:
@@ -377,7 +515,7 @@ async def _start_new_workflow(args: argparse.Namespace, config: AppConfig) -> in
 
     # 创建会话
     session = Session(
-        id=f"cli-{int(time.time())}",
+        id=f"cli-{int(time.time() * 1000)}",
         work_dir=work_dir,
         phase=Phase.INIT,
         yolo_mode=args.yolo,
@@ -485,7 +623,9 @@ async def _run_workflow_loop(
     # CODE_REVIEW 阶段暂停（非自动审查模式）
     while session.phase == Phase.CODE_REVIEW:
         print(f"\n  {colorize('⏸ 编码完成，等待审查决策...', phase_color('code_review'))}")
-        choice = input(f"({bold('r')}=审查 / {bold('s')}=跳过审查 / {bold('n')}=取消): ").strip().lower()
+        has_completed = bool(session.workflow_state and session.workflow_state.completed_tasks)
+        undo_hint = f" / {bold('u')}=撤销" if has_completed else ""
+        choice = input(f"({bold('r')}=审查 / {bold('s')}=跳过审查{undo_hint} / {bold('n')}=取消): ").strip().lower()
         if choice in ("r", "review", "审查"):
             await runner.handle_user_command(session, "start_review", broadcast)
             try:
@@ -495,6 +635,13 @@ async def _run_workflow_loop(
                 return 1
         elif choice in ("s", "skip", "跳过"):
             await runner.handle_user_command(session, "skip_review", broadcast)
+            try:
+                await runner.execute(session, task_text, broadcast)
+            except Exception as e:
+                print(f"\n  {colorize('✗ FATAL', phase_color('error'))} {e}", file=sys.stderr)
+                return 1
+        elif choice in ("u", "undo", "撤销") and has_completed:
+            await runner.handle_user_command(session, "undo", broadcast)
             try:
                 await runner.execute(session, task_text, broadcast)
             except Exception as e:
@@ -513,7 +660,9 @@ async def _run_workflow_loop(
 
         retry_count = ws.retry_count if ws else 0
         retry_info = f" {colorize(f'(第 {retry_count} 次重试)', phase_color('reviewing'))}" if retry_count > 0 else ""
-        choice = input(f"\n{colorize('审查不通过', phase_color('reviewing'))}{retry_info}，是否重新编码？({bold('y')}=重试 / {bold('s')}=跳过 / {bold('n')}=取消): ").strip().lower()
+        has_completed = bool(ws and ws.completed_tasks)
+        undo_hint = f" / {bold('u')}=撤销" if has_completed else ""
+        choice = input(f"\n{colorize('审查不通过', phase_color('reviewing'))}{retry_info}，是否重新编码？({bold('y')}=重试 / {bold('s')}=跳过{undo_hint} / {bold('n')}=取消): ").strip().lower()
         if choice in ("y", "yes", "重试"):
             await runner.handle_user_command(session, "retry", broadcast)
             try:
@@ -529,6 +678,13 @@ async def _run_workflow_loop(
                 except Exception as e:
                     print(f"\n  {colorize('✗ FATAL', phase_color('error'))} {e}", file=sys.stderr)
                     return 1
+        elif choice in ("u", "undo", "撤销") and has_completed:
+            await runner.handle_user_command(session, "undo", broadcast)
+            try:
+                await runner.execute(session, task_text, broadcast)
+            except Exception as e:
+                print(f"\n  {colorize('✗ FATAL', phase_color('error'))} {e}", file=sys.stderr)
+                return 1
         else:
             await runner.handle_user_command(session, "abort", broadcast)
             print(f"  {dim('已取消。')}")
@@ -606,6 +762,8 @@ def main() -> None:
             "  python -m backend.cli --list-sessions\n\n"
             "  # 恢复之前的会话\n"
             "  python -m backend.cli --resume cli-1722345678\n\n"
+            "  # 交互模式（任意目录输入 keke 唤起）\n"
+            "  keke\n\n"
             "  # 调试模式\n"
             "  python -m backend.cli \"任务\" -v\n"
         ),

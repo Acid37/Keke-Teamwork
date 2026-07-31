@@ -255,6 +255,19 @@ class AgentOrchestrator:
                 raise RuntimeError(result.error)
 
             session.usage_total += result.usage
+
+            # 广播文件变更（实时 Diff 展示）
+            if staging is not None:
+                commit = staging.commit()
+                if commit.files_changed > 0:
+                    await broadcast("files.changed", {
+                        "summary": commit.summary,
+                        "combined_diff": commit.combined_diff,
+                        "files": [{"path": str(d.path), "action": d.action,
+                                   "diff_text": d.diff_text}
+                                  for d in commit.diffs],
+                    })
+
             await broadcast("agent.completed", {
                 "agent_id": aid, "agent_name": aname, "role": arole,
                 "summary": result.text[:200] if result.text else "",

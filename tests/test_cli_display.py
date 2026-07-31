@@ -5,11 +5,14 @@ from __future__ import annotations
 import pytest
 
 from backend.cli_display import (
+    Spinner,
     Timer,
     banner,
     bold,
     colorize,
     dim,
+    format_diff,
+    format_file_change,
     format_phase_status,
     format_tool_call_result,
     format_tool_call_start,
@@ -382,3 +385,184 @@ class TestTimer:
         t._start = 100.0
         # 不 stop，elapsed 应该返回正数
         assert t.elapsed >= 0
+
+
+# ─── Spinner 测试 ───
+
+
+class TestSpinner:
+    """Spinner 动画测试。"""
+
+    def test_start_stop_without_color(self):
+        """非彩色模式下 start 应静默无操作。"""
+        s = Spinner("思考中")
+        s.start()
+        assert s._running is False
+        assert s._thread is None
+        s.stop()  # 应安全无操作
+
+    def test_start_with_color(self, color_enabled):
+        """彩色模式下 start 应启动后台线程。"""
+        s = Spinner("加载中")
+        s.start()
+        assert s._running is True
+        assert s._thread is not None
+        s.stop()
+        assert s._running is False
+        assert s._thread is None
+
+    def test_stop_without_start(self):
+        """未启动时 stop 应安全无操作。"""
+        s = Spinner("test")
+        s.stop()
+        assert s._running is False
+
+    def test_double_start(self, color_enabled):
+        """重复 start 不应创建第二个线程。"""
+        s = Spinner("test")
+        s.start()
+        first_thread = s._thread
+        s.start()  # 第二次 start 应被忽略
+        assert s._thread is first_thread
+        s.stop()
+
+    def test_update_label(self):
+        """update 应修改标签。"""
+        s = Spinner("旧标签")
+        s.update("新标签")
+        assert s._label == "新标签"
+
+    def test_stop_clears_running_flag(self, color_enabled):
+        """stop 应清除 running 标志。"""
+        s = Spinner("test")
+        s.start()
+        assert s._running is True
+        s.stop()
+        assert s._running is False
+
+
+# ─── format_diff 测试 ───
+
+
+class TestFormatDiff:
+    """彩色 Diff 格式化测试。"""
+
+    def test_empty_diff(self):
+        """空 diff 应返回空字符串。"""
+        assert format_diff("") == ""
+
+    def test_none_diff(self):
+        """None 应返回空字符串。"""
+        assert format_diff("") == ""
+
+    def test_addition_line(self, color_enabled):
+        """新增行（+）应使用绿色。"""
+        result = format_diff("+new line")
+        assert "\033[32m" in result  # GREEN
+        assert "+new line" in result
+
+    def test_deletion_line(self, color_enabled):
+        """删除行（-）应使用红色。"""
+        result = format_diff("-old line")
+        assert "\033[31m" in result  # RED
+        assert "-old line" in result
+
+    def test_file_header(self, color_enabled):
+        """文件头（--- / +++）应使用亮青色。"""
+        result = format_diff("--- a/file.py\n+++ b/file.py")
+        assert "\033[96m" in result  # BRIGHT_CYAN
+        assert "--- a/file.py" in result
+        assert "+++ b/file.py" in result
+
+    def test_hunk_header(self, color_enabled):
+        """hunk 头（@@）应使用洋红色。"""
+        result = format_diff("@@ -1,3 +1,4 @@")
+        assert "\033[35m" in result  # MAGENTA
+        assert "@@ -1,3 +1,4 @@" in result
+
+    def test_context_line(self, color_enabled):
+        """上下文行（空格开头）应使用 dim。"""
+        result = format_diff(" context line")
+        assert "\033[2m" in result  # DIM
+
+    def test_truncation(self):
+        """超过 max_lines 的 diff 应被截断。"""
+        lines = [f"+line {i}" for i in range(100)]
+        result = format_diff("\n".join(lines), max_lines=10)
+        assert "...(diff 已截断)" in result
+        assert "line 0" in result
+        assert "line 99" not in result
+
+    def test_no_truncation_when_short(self):
+        """行数不超过 max_lines 时不应截断。"""
+        result = format_diff("+line 1\n+line 2", max_lines=50)
+        assert "截断" not in result
+
+    def test_no_color_diff(self):
+        """非彩色模式下不应包含 ANSI 码。"""
+        result = format_diff("+add\n-del\n--- a/x\n+++ b/x\n@@ -1,1 +1,1 @@\n ctx")
+        assert "\033[" not in result
+        assert "+add" in result
+        assert "-del" in result
+
+    def test_multiline_diff(self):
+        """多行 diff 应全部输出。"""
+        diff = "--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n-old\n+new\n ctx"
+        result = format_diff(diff)
+        assert "--- a/x" in result
+        assert "+++ b/x" in result
+        assert "-old" in result
+        assert "+new" in result
+        assert "ctx" in result
+
+
+# ─── format_file_change 测试 ───
+
+
+class TestFormatFileChange:
+    """文件变更摘要行格式化测试。"""
+
+    def test_create_action(self):
+        """create 动作应显示新建标签。"""
+        result = format_file_change("src/main.py", "create")
+        assert "新建" in result
+        assert "src/main.py" in result
+
+    def test_modify_action(self):
+        """modify 动作应显示修改标签。"""
+        result = format_file_change("src/util.py", "modify")
+        assert "修改" in result
+        assert "src/util.py" in result
+
+    def test_delete_action(self):
+        """delete 动作应显示删除标签。"""
+        result = format_file_change("old/removed.py", "delete")
+        assert "删除" in result
+        assert "old/removed.py" in result
+
+    def test_unknown_action(self):
+        """未知动作应回退为原始动作名。"""
+        result = format_file_change("file.txt", "unknown")
+        assert "unknown" in result
+        assert "file.txt" in result
+
+    def test_create_with_color(self, color_enabled):
+        """create 动作应使用绿色。"""
+        result = format_file_change("src/new.py", "create")
+        assert "\033[32m" in result  # GREEN
+
+    def test_modify_with_color(self, color_enabled):
+        """modify 动作应使用黄色。"""
+        result = format_file_change("src/edit.py", "modify")
+        assert "\033[33m" in result  # YELLOW
+
+    def test_delete_with_color(self, color_enabled):
+        """delete 动作应使用红色。"""
+        result = format_file_change("src/gone.py", "delete")
+        assert "\033[31m" in result  # RED
+
+    def test_no_color_file_change(self):
+        """非彩色模式下不应包含 ANSI 码。"""
+        result = format_file_change("src/main.py", "create")
+        assert "\033[" not in result
+        assert "新建" in result

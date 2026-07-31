@@ -359,16 +359,17 @@ def _heuristic_parse_review(text: str, task_id: str) -> ReviewReport | None:
     """
     text_lower = text.lower()
 
-    # 判定总体结论
-    if any(kw in text_lower for kw in ("批准", "通过", "approve", "approved", "lgtm")):
-        verdict = VERDICT_APPROVED
-        should_retry = False
-    elif any(kw in text_lower for kw in ("拒绝", "驳回", "reject", "rejected")):
+    # 判定总体结论（优先级：rejected > needs_changes > approved）
+    # 先检查最严重的判定，避免"拒绝...通过测试"被误判为 approved
+    if any(kw in text_lower for kw in ("拒绝", "驳回", "reject", "rejected")):
         verdict = VERDICT_REJECTED
         should_retry = True
     elif any(kw in text_lower for kw in ("需要修改", "需修改", "needs_changes", "needs change", "建议修改")):
         verdict = VERDICT_NEEDS_CHANGES
         should_retry = True
+    elif any(kw in text_lower for kw in ("批准", "通过", "approve", "approved", "lgtm")):
+        verdict = VERDICT_APPROVED
+        should_retry = False
     else:
         # 无法判定时默认通过
         verdict = VERDICT_APPROVED

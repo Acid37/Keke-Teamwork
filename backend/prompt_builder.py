@@ -228,10 +228,29 @@ def build_phase_prompt(
     if phase == Phase.PLANNING:
         base += (
             "\n\n当前阶段：需求分析与任务规划。\n"
-            "请将用户需求拆解为结构化的子任务计划。\n"
-            "输出格式要求：先给出方案概述，再列出编号子任务清单。\n"
-            "每个子任务需包含：标题、详细描述、涉及文件、验收标准。\n"
-            "如果识别到风险或依赖，也请一并列出。\n"
+            "请将用户需求拆解为结构化的子任务计划。\n\n"
+            "⚠️ 输出格式要求（必须严格遵守）：\n"
+            "先简要概述方案（1-2 句话），然后用以下标记包裹的 JSON 输出任务列表：\n"
+            "---TASKLIST_START---\n"
+            "{\n"
+            '  "overview": "方案概述",\n'
+            '  "tasks": [\n'
+            '    {\n'
+            '      "id": "task-1",\n'
+            '      "title": "任务标题（简短）",\n'
+            '      "description": "详细描述",\n'
+            '      "files_involved": ["src/file.py"],\n'
+            '      "acceptance_criteria": "验收标准"\n'
+            "    }\n"
+            "  ],\n"
+            '  "risks": ["风险1"],\n'
+            '  "estimated_effort": "预估工时"\n'
+            "}\n"
+            "---TASKLIST_END---\n\n"
+            "注意：\n"
+            "- 任务数量控制在 2-6 个，粒度适中\n"
+            "- 每个任务的 title 是简短的动宾短语（如「实现乘除法函数」），不是文件名\n"
+            "- JSON 必须合法，不要在标记外输出多余内容\n"
         )
         return base
 
@@ -300,6 +319,29 @@ def build_phase_prompt(
             review_block += f"\n待审查变更（diff）：\n{diff_text}\n"
         if diff.test_results:
             review_block += f"\n测试结果：\n{diff.test_results}\n"
+        review_block += (
+            "\n⚠️ 输出格式要求（必须严格遵守）：\n"
+            "用以下标记包裹的 JSON 输出审查报告：\n"
+            "---REVIEW_START---\n"
+            "{\n"
+            '  "overall_verdict": "approved | needs_changes | rejected",\n'
+            '  "summary": "审查总结",\n'
+            '  "should_retry": true,\n'
+            '  "file_reviews": [\n'
+            '    {\n'
+            '      "file_path": "src/file.py",\n'
+            '      "issues": ["问题描述"],\n'
+            '      "suggestions": ["改进建议"],\n'
+            '      "severity": "blocker | warning | info"\n'
+            "    }\n"
+            "  ]\n"
+            "}\n"
+            "---REVIEW_END---\n\n"
+            "判定标准：\n"
+            "- approved：代码质量良好，可以合并\n"
+            "- needs_changes：存在问题需修改后重审\n"
+            "- rejected：严重问题，需要重做\n"
+        )
         base += review_block
         return base
 
