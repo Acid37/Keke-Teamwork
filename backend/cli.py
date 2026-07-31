@@ -27,6 +27,29 @@ import time
 from pathlib import Path
 
 from backend.agent_store import AgentStore
+from backend.cli_display import (
+    Timer,
+    banner,
+    bold,
+    colorize,
+    dim,
+    format_phase_status,
+    format_tool_call_result,
+    format_tool_call_start,
+    format_token_usage,
+    format_verdict,
+    phase_banner,
+    phase_color,
+    phase_icon,
+    progress_bar,
+    role_color,
+    role_label,
+    separator,
+    set_color_enabled,
+    should_use_color,
+    severity_color,
+    severity_icon,
+)
 from backend.config import AppConfig
 from backend.llm.client import LLMClient, LLMClientFactory
 from backend.orchestrator import AgentOrchestrator
@@ -42,28 +65,43 @@ logger = logging.getLogger(__name__)
 
 
 def _make_console_broadcast():
-    """创建一个将工作流事件打印到终端的广播闭包。"""
+    """创建一个将工作流事件打印到终端的彩色广播闭包。"""
+
+    # 追踪当前阶段，用于检测阶段切换
+    state = {"current_phase": "", "agent_active": False}
 
     async def broadcast(event_type: str, payload: dict) -> None:
         if event_type == "agent.status":
             phase = payload.get("phase", "")
             detail = payload.get("detail", "")
-            print(f"  [{phase}] {detail}")
+
+            # 检测阶段切换，打印横幅
+            if phase != state["current_phase"]:
+                state["current_phase"] = phase
+                print(phase_banner(phase, detail))
+
+            print(format_phase_status(phase, detail))
 
         elif event_type == "agent.started":
             name = payload.get("agent_name", "")
             role = payload.get("role", "")
-            print(f"\n>>> {name} ({role}) 启动")
+            state["agent_active"] = True
+            print(f"\n{role_label(role, name)} {dim('启动...')}")
 
         elif event_type == "agent.completed":
             name = payload.get("agent_name", "")
+            role = payload.get("role", "")
             summary = payload.get("summary", "")
             usage = payload.get("usage", {})
             in_tok = usage.get("input_tokens", 0)
             out_tok = usage.get("output_tokens", 0)
-            print(f"<<< {name} 完成 (tokens: {in_tok} in / {out_tok} out)")
+            state["agent_active"] = False
+
+            label = role_label(role, name)
+            tokens = dim(format_token_usage(in_tok, out_tok))
+            print(f"\n{label} {colorize('完成', phase_color('completed'))} ({tokens})")
             if summary:
-                print(f"    摘要: {summary}")
+                print(f"  {dim('摘要:')} {summary}")
 
         elif event_type == "agent.text":
             text = payload.get("text", "")
@@ -71,19 +109,27 @@ def _make_console_broadcast():
             if not is_final:
                 print(text, end="", flush=True)
 
+        elif event_type == "agent.thinking":
+            text = payload.get("text", "")
+            if text:
+                print(dim(text), end="", flush=True)
+
         elif event_type == "error":
             msg = payload.get("message", "")
-            print(f"\n[ERROR] {msg}", file=sys.stderr)
+            print(f"\n  {colorize('✗ ERROR', phase_color('error'))} {msg}", file=sys.stderr)
 
         elif event_type == "tool.call":
             name = payload.get("name", "")
             stage = payload.get("stage", "")
             if stage == "running":
-                print(f"\n  [tool] {name} ...")
+                args = payload.get("args", {})
+                if isinstance(args, dict):
+                    # 过滤掉 result 键
+                    args = {k: v for k, v in args.items() if k != "result"}
+                print(format_tool_call_start(name, args if isinstance(args, dict) else None))
             elif stage == "completed":
                 success = payload.get("success", False)
-                status = "OK" if success else "FAIL"
-                print(f"  [tool] {name} -> {status}")
+                print(format_tool_call_result(name, success))
 
     return broadcast
 
@@ -92,91 +138,98 @@ def _make_console_broadcast():
 
 
 def _print_task_list(task_list) -> None:
-    """打印任务计划。"""
-    print("\n" + "=" * 60)
-    print("  任务规划完成")
-    print("=" * 60)
+    """打印任务计划（彩色 + 进度条）。"""
+    print("\n" + banner("任务规划完成"))
 
     if task_list.overview:
-        print(f"\n  方案概述：{task_list.overview}")
+        print(f"\n  {bold('方案概述：')}{task_list.overview}")
 
-    print(f"\n  共 {task_list.total_count} 个子任务：\n")
+    completed = task_list.completed_count
+    total = task_list.total_count
+    print(f"\n  {bold('进度：')} {progress_bar(completed, total)}")
+
+    print(f"\n  {bold(f'共 {total} 个子任务：')}\n")
     for i, task in enumerate(task_list.tasks, 1):
-        status_mark = {
-            "pending": " ",
-            "in_progress": "→",
-            "done": "✓",
-            "skipped": "-",
-        }.get(task.status, " ")
-        print(f"  {status_mark} {i}. {task.title}")
+        status_config = {
+            "pending": ("○", phase_color("init")),
+            "in_progress": ("→", phase_color("coding")),
+            "done": ("✓", phase_color("completed")),
+            "skipped": ("-", phase_color("error")),
+        }
+        mark, color = status_config.get(task.status, ("○", phase_color("init")))
+        task_num = colorize(f"  {mark} {i}.", color)
+        print(f"{task_num} {bold(task.title)}")
         if task.description:
-            print(f"     {task.description}")
+            print(f"     {dim(task.description)}")
         if task.files_involved:
-            print(f"     涉及文件: {', '.join(task.files_involved)}")
+            print(f"     {dim('涉及文件:')} {', '.join(task.files_involved)}")
         if task.acceptance_criteria:
-            print(f"     验收标准: {task.acceptance_criteria}")
+            print(f"     {dim('验收标准:')} {task.acceptance_criteria}")
         print()
 
     if task_list.risks:
-        print("  风险提示：")
+        print(f"  {colorize('⚠ 风险提示', phase_color('reviewing'))}")
         for risk in task_list.risks:
-            print(f"    - {risk}")
+            print(f"    {colorize('-', phase_color('reviewing'))} {risk}")
         print()
 
     if task_list.estimated_effort:
-        print(f"  预估工时: {task_list.estimated_effort}")
+        print(f"  {dim('预估工时:')} {task_list.estimated_effort}")
 
-    print("\n" + "=" * 60)
+    print("\n" + separator())
 
 
 def _print_review_report(report) -> None:
-    """打印审查报告。"""
-    print("\n" + "-" * 40)
-    print(f"  审查结果: {report.overall_verdict}")
+    """打印审查报告（彩色）。"""
+    print("\n" + separator("-", 50))
+    print(f"  {bold('审查结果:')} {format_verdict(report.overall_verdict)}")
     if report.summary:
-        print(f"  摘要: {report.summary}")
+        print(f"  {dim('摘要:')} {report.summary}")
 
     for fr in report.file_reviews:
-        print(f"\n  [{fr.file_path}] ({fr.severity})")
+        icon = severity_icon(fr.severity)
+        color = severity_color(fr.severity)
+        print(f"\n  {colorize(f'{icon} [{fr.file_path}]', color)} {dim(f'({fr.severity})')}")
         for issue in fr.issues:
-            print(f"    问题: {issue}")
+            print(f"    {colorize('问题:', phase_color('error'))} {issue}")
         for sug in fr.suggestions:
-            print(f"    建议: {sug}")
+            print(f"    {colorize('建议:', phase_color('reviewing'))} {sug}")
 
     if report.should_retry:
-        print("\n  ⚠ 需要修改后重新审查")
-    print("-" * 40)
+        print(f"\n  {colorize('⚠ 需要修改后重新审查', phase_color('reviewing'))}")
+    print(separator("-", 50))
 
 
 def _print_workflow_progress(session: Session) -> None:
-    """打印当前工作流进度（恢复时展示已有状态）。"""
+    """打印当前工作流进度（恢复时展示已有状态，含进度条）。"""
     ws = session.workflow_state
     if ws is None or ws.task_list is None:
         return
 
     tl = ws.task_list
-    print(f"\n  会话进度: {tl.completed_count}/{tl.total_count} 个子任务已完成")
-    print(f"  当前阶段: {session.phase.value}")
+    completed = tl.completed_count
+    total = tl.total_count
+
+    print(f"\n  {bold('会话进度:')} {progress_bar(completed, total)}")
+    print(f"  {bold('当前阶段:')} {colorize(session.phase.value, phase_color(session.phase.value))}")
 
     if tl.current_task:
-        print(f"  当前任务: {tl.current_task.title}")
+        print(f"  {bold('当前任务:')} {tl.current_task.title}")
 
     if ws.completed_tasks:
-        print(f"  已完成: {', '.join(ws.completed_tasks)}")
+        print(f"  {dim('已完成:')} {', '.join(ws.completed_tasks)}")
 
 
 def _list_sessions(config: AppConfig) -> int:
-    """列出所有可恢复的会话。"""
+    """列出所有可恢复的会话（彩色）。"""
     session_store = SessionStore(config.data_dir)
     sessions = session_store.list_sessions()
 
     if not sessions:
-        print("  没有可恢复的会话。")
+        print(f"  {dim('没有可恢复的会话。')}")
         return 0
 
-    print("\n" + "=" * 60)
-    print("  可恢复的会话")
-    print("=" * 60)
+    print("\n" + banner("可恢复的会话"))
 
     for s in sessions:
         sid = s["session_id"]
@@ -185,14 +238,14 @@ def _list_sessions(config: AppConfig) -> int:
         ts = s.get("last_active_at", 0)
         ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts)) if ts else "未知"
 
-        print(f"\n  ID:    {sid}")
-        print(f"  标题:  {title}")
-        print(f"  阶段:  {phase}")
-        print(f"  时间:  {ts_str}")
+        print(f"\n  {bold('ID:')}    {colorize(sid, phase_color('planning'))}")
+        print(f"  {bold('标题:')}  {title}")
+        print(f"  {bold('阶段:')}  {colorize(phase, phase_color(phase))}")
+        print(f"  {dim('时间:')}  {ts_str}")
 
-    print("\n" + "=" * 60)
-    print("  使用 --resume <session-id> 恢复指定会话")
-    print("=" * 60 + "\n")
+    print("\n" + separator())
+    print(f"  {dim('使用 --resume <session-id> 恢复指定会话')}")
+    print(separator() + "\n")
 
     return 0
 
@@ -257,7 +310,8 @@ async def _run_workflow_cli(args: argparse.Namespace) -> int:
 
     if not config.api_key:
         print(
-            "ERROR: API key 未配置。请通过 Web UI 配置或设置 CT_API_KEY 环境变量。",
+            f"  {colorize('✗ ERROR', phase_color('error'))} API key 未配置。"
+            f"请通过 Web UI 配置或设置 CT_API_KEY 环境变量。",
             file=sys.stderr,
         )
         return 1
@@ -272,7 +326,10 @@ async def _run_workflow_cli(args: argparse.Namespace) -> int:
 
     # ── 正常新建工作流模式 ──
     if not args.task:
-        print("ERROR: 请提供任务描述，或使用 --resume / --list-sessions", file=sys.stderr)
+        print(
+            f"  {colorize('✗', phase_color('error'))} 请提供任务描述，或使用 --resume / --list-sessions",
+            file=sys.stderr,
+        )
         return 1
 
     return await _start_new_workflow(args, config)
@@ -282,7 +339,7 @@ async def _start_new_workflow(args: argparse.Namespace, config: AppConfig) -> in
     """启动新的工作流会话。"""
     work_dir = Path(args.work_dir).resolve()
     if not work_dir.exists():
-        print(f"ERROR: 工作目录不存在: {work_dir}", file=sys.stderr)
+        print(f"  {colorize('✗', phase_color('error'))} 工作目录不存在: {work_dir}", file=sys.stderr)
         return 1
 
     orchestrator, runner, session_store = _init_components(config)
@@ -301,13 +358,14 @@ async def _start_new_workflow(args: argparse.Namespace, config: AppConfig) -> in
 
     broadcast = _make_console_broadcast()
 
-    print(f"\n工作目录: {work_dir}")
-    print(f"模型: {config.main_model}")
-    print(f"自动审查: {'是' if session.auto_review else '否'}")
-    print(f"YOLO 模式: {'是' if session.yolo_mode else '否'}")
-    print(f"会话 ID: {session.id}")
-    print(f"\n任务: {args.task}")
-    print("\n" + "=" * 60 + "\n")
+    print(f"\n{banner('Keke Teamwork 工作流')}")
+    print(f"\n  {bold('工作目录:')} {work_dir}")
+    print(f"  {bold('模型:')}     {config.main_model}")
+    print(f"  {bold('自动审查:')} {colorize('是', phase_color('completed')) if session.auto_review else colorize('否', phase_color('error'))}")
+    print(f"  {bold('YOLO 模式:')} {colorize('是', phase_color('reviewing')) if session.yolo_mode else '否'}")
+    print(f"  {bold('会话 ID:')}  {colorize(session.id, phase_color('planning'))}")
+    print(f"\n  {bold('任务:')} {args.task}")
+    print("\n" + separator() + "\n")
 
     return await _run_workflow_loop(session, runner, args.task, broadcast)
 
@@ -318,7 +376,7 @@ async def _resume_session(args: argparse.Namespace, config: AppConfig) -> int:
 
     session = session_store.load(args.resume)
     if session is None:
-        print(f"ERROR: 未找到会话 {args.resume}", file=sys.stderr)
+        print(f"  {colorize('✗', phase_color('error'))} 未找到会话 {args.resume}", file=sys.stderr)
         return 1
 
     # 恢复时使用 session.title 作为任务描述
@@ -326,14 +384,15 @@ async def _resume_session(args: argparse.Namespace, config: AppConfig) -> int:
 
     broadcast = _make_console_broadcast()
 
-    print(f"\n恢复会话: {session.id}")
-    print(f"工作目录: {session.work_dir}")
-    print(f"模型: {config.main_model}")
-    print(f"当前阶段: {session.phase.value}")
+    print(f"\n{banner('恢复工作流会话')}")
+    print(f"\n  {bold('会话 ID:')}  {colorize(session.id, phase_color('planning'))}")
+    print(f"  {bold('工作目录:')} {session.work_dir}")
+    print(f"  {bold('模型:')}     {config.main_model}")
+    print(f"  {bold('当前阶段:')} {colorize(session.phase.value, phase_color(session.phase.value))}")
 
     _print_workflow_progress(session)
 
-    print("\n" + "=" * 60 + "\n")
+    print("\n" + separator() + "\n")
 
     return await _run_workflow_loop(session, runner, task_text, broadcast)
 
@@ -356,7 +415,7 @@ async def _run_workflow_loop(
         try:
             await runner.execute(session, task_text, broadcast)
         except Exception as e:
-            print(f"\nFATAL: {e}", file=sys.stderr)
+            print(f"\n  {colorize('✗ FATAL', phase_color('error'))} {e}", file=sys.stderr)
             return 1
 
     # PLAN_REVIEW 阶段暂停：等待用户确认/拒绝
@@ -365,20 +424,20 @@ async def _run_workflow_loop(
         if ws and ws.task_list:
             _print_task_list(ws.task_list)
 
-        choice = input("\n确认计划？(y=继续 / n=取消 / e=修改): ").strip().lower()
+        choice = input(f"\n{bold('确认计划？')}(y=继续 / n=取消 / e=修改): ").strip().lower()
         if choice in ("y", "yes", "确认"):
             await runner.handle_user_command(session, "approve_plan", broadcast)
             try:
                 await runner.execute(session, task_text, broadcast)
             except Exception as e:
-                print(f"\nFATAL: {e}", file=sys.stderr)
+                print(f"\n  {colorize('✗ FATAL', phase_color('error'))} {e}", file=sys.stderr)
                 return 1
         elif choice in ("n", "no", "取消"):
             await runner.handle_user_command(session, "abort", broadcast)
-            print("已取消。")
+            print(f"  {dim('已取消。')}")
             return 0
         elif choice in ("e", "edit", "修改"):
-            new_req = input("请输入修改后的需求: ").strip()
+            new_req = input(f"{bold('请输入修改后的需求:')} ").strip()
             if new_req:
                 await runner.handle_user_command(
                     session, "reject_plan", broadcast, user_text=new_req)
@@ -387,32 +446,32 @@ async def _run_workflow_loop(
                 try:
                     await runner.execute(session, task_text, broadcast)
                 except Exception as e:
-                    print(f"\nFATAL: {e}", file=sys.stderr)
+                    print(f"\n  {colorize('✗ FATAL', phase_color('error'))} {e}", file=sys.stderr)
                     return 1
             else:
-                print("未输入新需求，继续等待确认。")
+                print(f"  {dim('未输入新需求，继续等待确认。')}")
 
     # CODE_REVIEW 阶段暂停（非自动审查模式）
     while session.phase == Phase.CODE_REVIEW:
-        print("\n  编码完成，等待审查决策...")
-        choice = input("(r=审查 / s=跳过审查 / n=取消): ").strip().lower()
+        print(f"\n  {colorize('⏸ 编码完成，等待审查决策...', phase_color('code_review'))}")
+        choice = input(f"({bold('r')}=审查 / {bold('s')}=跳过审查 / {bold('n')}=取消): ").strip().lower()
         if choice in ("r", "review", "审查"):
             await runner.handle_user_command(session, "start_review", broadcast)
             try:
                 await runner.execute(session, task_text, broadcast)
             except Exception as e:
-                print(f"\nFATAL: {e}", file=sys.stderr)
+                print(f"\n  {colorize('✗ FATAL', phase_color('error'))} {e}", file=sys.stderr)
                 return 1
         elif choice in ("s", "skip", "跳过"):
             await runner.handle_user_command(session, "skip_review", broadcast)
             try:
                 await runner.execute(session, task_text, broadcast)
             except Exception as e:
-                print(f"\nFATAL: {e}", file=sys.stderr)
+                print(f"\n  {colorize('✗ FATAL', phase_color('error'))} {e}", file=sys.stderr)
                 return 1
         else:
             await runner.handle_user_command(session, "abort", broadcast)
-            print("已取消。")
+            print(f"  {dim('已取消。')}")
             return 0
 
     # FEEDBACK 阶段暂停：审查不通过
@@ -421,13 +480,13 @@ async def _run_workflow_loop(
         if ws and ws.last_review_report:
             _print_review_report(ws.last_review_report)
 
-        choice = input("\n审查不通过，是否重新编码？(y=重试 / s=跳过 / n=取消): ").strip().lower()
+        choice = input(f"\n{colorize('审查不通过', phase_color('reviewing'))}，是否重新编码？({bold('y')}=重试 / {bold('s')}=跳过 / {bold('n')}=取消): ").strip().lower()
         if choice in ("y", "yes", "重试"):
             await runner.handle_user_command(session, "retry", broadcast)
             try:
                 await runner.execute(session, task_text, broadcast)
             except Exception as e:
-                print(f"\nFATAL: {e}", file=sys.stderr)
+                print(f"\n  {colorize('✗ FATAL', phase_color('error'))} {e}", file=sys.stderr)
                 return 1
         elif choice in ("s", "skip", "跳过"):
             await runner.handle_user_command(session, "skip_task", broadcast)
@@ -435,47 +494,48 @@ async def _run_workflow_loop(
                 try:
                     await runner.execute(session, task_text, broadcast)
                 except Exception as e:
-                    print(f"\nFATAL: {e}", file=sys.stderr)
+                    print(f"\n  {colorize('✗ FATAL', phase_color('error'))} {e}", file=sys.stderr)
                     return 1
         else:
             await runner.handle_user_command(session, "abort", broadcast)
-            print("已取消。")
+            print(f"  {dim('已取消。')}")
             return 0
 
     # ERROR 阶段：询问恢复
     while session.phase == Phase.ERROR:
-        choice = input("\n工作流出错，是否恢复？(y=重新规划 / n=退出): ").strip().lower()
+        choice = input(f"\n  {colorize('✗ 工作流出错', phase_color('error'))}，是否恢复？({bold('y')}=重新规划 / {bold('n')}=退出): ").strip().lower()
         if choice in ("y", "yes", "恢复"):
             await runner.handle_user_command(session, "resume", broadcast)
             try:
                 await runner.execute(session, task_text, broadcast)
             except Exception as e:
-                print(f"\nFATAL: {e}", file=sys.stderr)
+                print(f"\n  {colorize('✗ FATAL', phase_color('error'))} {e}", file=sys.stderr)
                 return 1
         else:
-            print("已退出。")
+            print(f"  {dim('已退出。')}")
             break
 
     # 最终状态
-    print("\n" + "=" * 60)
+    print("\n" + separator())
     if session.phase == Phase.COMPLETED:
         ws = session.workflow_state
         total = ws.task_list.total_count if ws and ws.task_list else 0
         completed = ws.task_list.completed_count if ws and ws.task_list else 0
-        print(f"  工作流完成！{completed}/{total} 个子任务已完成")
+        print(f"  {colorize(phase_icon('completed'), phase_color('completed'))} {bold('工作流完成！')}")
+        print(f"  {bold('进度：')} {progress_bar(completed, total)}")
     elif session.phase == Phase.ERROR:
-        print("  工作流执行出错。")
+        print(f"  {colorize(phase_icon('error'), phase_color('error'))} {bold('工作流执行出错。')}")
     else:
-        print(f"  工作流暂停于阶段: {session.phase.value}")
+        print(f"  {colorize(phase_icon(session.phase.value), phase_color(session.phase.value))} 工作流暂停于阶段: {colorize(session.phase.value, phase_color(session.phase.value))}")
 
     # 打印会话 ID（供恢复使用）
-    print(f"  会话 ID: {session.id}")
-    print(f"  恢复命令: python -m backend.cli --resume {session.id}")
+    print(f"\n  {bold('会话 ID:')} {colorize(session.id, phase_color('planning'))}")
+    print(f"  {dim('恢复命令:')} python -m backend.cli --resume {session.id}")
 
     # 打印 token 使用
     usage = session.usage_total
-    print(f"\n  Token 使用: {usage.input_tokens} input / {usage.output_tokens} output")
-    print("=" * 60 + "\n")
+    print(f"\n  {bold('Token 使用:')} {format_token_usage(usage.input_tokens, usage.output_tokens)}")
+    print(separator() + "\n")
 
     return 0 if session.phase == Phase.COMPLETED else 1
 
@@ -517,8 +577,17 @@ def main() -> None:
         action="store_true",
         help="列出所有可恢复的会话",
     )
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        help="禁用彩色输出（非 TTY 时自动禁用）",
+    )
 
     args = parser.parse_args()
+
+    # 禁用彩色输出
+    if args.no_color:
+        set_color_enabled(False)
 
     logging.basicConfig(
         level=logging.WARNING,
