@@ -295,6 +295,8 @@ class WorkflowState:
     plan_approved: bool = False
     completed_tasks: list[str] = field(default_factory=list)
     user_command_queue: list[dict] = field(default_factory=list)
+    retry_count: int = 0
+    total_files_changed: int = 0
 
     @property
     def current_task(self) -> SubTask | None:
@@ -311,6 +313,8 @@ class WorkflowState:
             "plan_approved": self.plan_approved,
             "completed_tasks": self.completed_tasks,
             "user_command_queue": self.user_command_queue,
+            "retry_count": self.retry_count,
+            "total_files_changed": self.total_files_changed,
         }
 
     @classmethod
@@ -333,6 +337,8 @@ class WorkflowState:
             plan_approved=data.get("plan_approved", False),
             completed_tasks=data.get("completed_tasks", []),
             user_command_queue=data.get("user_command_queue", []),
+            retry_count=data.get("retry_count", 0),
+            total_files_changed=data.get("total_files_changed", 0),
         )
 
 

@@ -251,10 +251,11 @@ def format_token_usage(input_tokens: int, output_tokens: int) -> str:
 
 # ─── 工具调用格式化 ───
 
-def format_tool_call_start(name: str, args: dict | None = None) -> str:
+def format_tool_call_start(name: str, args: dict | None = None, num: int = 0) -> str:
     """格式化工具调用开始。"""
     icon = colorize("🔧", _GRAY)
     tool_name = colorize(name, _BRIGHT_CYAN)
+    num_str = dim(f"#{num}") if num > 0 else ""
     detail = ""
     if args:
         # 只显示关键参数，截断过长的值
@@ -265,7 +266,8 @@ def format_tool_call_start(name: str, args: dict | None = None) -> str:
                 sv = sv[:50] + "..."
             short_args[k] = sv
         detail = dim(f"({short_args})") if short_args else ""
-    return f"  {icon} {tool_name} {detail}"
+    parts = [f"  {icon}", num_str, tool_name, detail]
+    return " ".join(p for p in parts if p)
 
 
 def format_tool_call_result(name: str, success: bool) -> str:

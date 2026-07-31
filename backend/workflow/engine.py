@@ -38,6 +38,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+MAX_RETRIES_PER_TASK = 3
+
 
 class WorkflowRunner:
     """工作流阶段状态机主循环。
@@ -154,6 +156,25 @@ class WorkflowRunner:
                     return
                 session.workflow_state.last_review_report = report
                 if report.should_retry:
+                    ws = session.workflow_state
+                    ws.retry_count += 1
+                    if ws.retry_count >= MAX_RETRIES_PER_TASK:
+                        # 重试上限 reached — 自动跳过当前任务
+                        logger.warning(
+                            "Task %s reached max retries (%d), auto-skipping",
+                            ws.current_task.id if ws.current_task else "?",
+                            MAX_RETRIES_PER_TASK,
+                        )
+                        await broadcast("agent.status", {
+                            "phase": "error",
+                            "detail": f"任务重试已达上限（{MAX_RETRIES_PER_TASK}次），自动跳过",
+                        })
+                        ws.current_diff_set = None
+                        ws.last_review_report = None
+                        session.coder_guidance_queue.clear()
+                        self._advance_to_next_task(session)
+                        self._save_session(session)
+                        continue
                     session.phase = Phase.FEEDBACK
                     self._inject_review_feedback(session, report)
                     # 暂停，等待用户确认后重试
@@ -287,9 +308,10 @@ class WorkflowRunner:
             ws.current_diff_set = None
             ws.last_review_report = None
             session.phase = Phase.CODING
+            retry_info = f"（第 {ws.retry_count} 次重试）" if ws.retry_count > 0 else ""
             await broadcast("agent.status", {
                 "phase": "coding",
-                "detail": "根据审查反馈重新编码...",
+                "detail": f"根据审查反馈重新编码{retry_info}...",
             })
             self._save_session(session)
             return True
@@ -412,9 +434,16 @@ class WorkflowRunner:
 
         task_message = self._build_coder_message(task, session)
 
+        # 任务索引感知
+        ws = session.workflow_state
+        task_index = ws.task_list.current_task_index + 1 if ws and ws.task_list else 0
+        task_total = ws.task_list.total_count if ws and ws.task_list else 0
+        retry_info = f"（重试第 {ws.retry_count} 次）" if ws and ws.retry_count > 0 else ""
+        index_str = f" {task_index}/{task_total}" if task_total > 0 else ""
+
         await broadcast("agent.status", {
             "phase": "coding",
-            "detail": f"正在执行子任务：{task.title}",
+            "detail": f"正在执行子任务{index_str}：{task.title}{retry_info}",
         })
 
         try:
@@ -438,6 +467,9 @@ class WorkflowRunner:
             commit = staging.commit()
             if commit.files_changed > 0:
                 diff_set = DiffSet.from_commit_result(task.id, commit)
+                # 累计文件变更数
+                if session.workflow_state:
+                    session.workflow_state.total_files_changed += commit.files_changed
                 logger.info(
                     "Coder produced %d file changes for task=%s",
                     commit.files_changed, task.id,
@@ -525,9 +557,14 @@ class WorkflowRunner:
     def _build_coder_message(task: SubTask, session: Session) -> str:
         """构建给 coder 的任务指令消息。
 
-        包含阶段间上下文传递：planner 方案概述、已完成任务清单。
+        包含阶段间上下文传递：planner 方案概述、已完成任务清单、任务索引。
         """
-        parts = [f"请完成以下编码任务：\n\n任务标题：{task.title}"]
+        ws = session.workflow_state
+        task_index = ws.task_list.current_task_index + 1 if ws and ws.task_list else 0
+        task_total = ws.task_list.total_count if ws and ws.task_list else 0
+        index_prefix = f"（任务 {task_index}/{task_total}）" if task_total > 0 else ""
+
+        parts = [f"请完成以下编码任务：{index_prefix}\n\n任务标题：{task.title}"]
         if task.description:
             parts.append(f"任务描述：{task.description}")
         if task.files_involved:
@@ -613,6 +650,7 @@ class WorkflowRunner:
 
         # 清理本轮产物
         ws.current_diff_set = None
+        ws.retry_count = 0  # 重置重试计数
 
         if next_task is None:
             session.phase = Phase.COMPLETED
@@ -671,8 +709,9 @@ class WorkflowRunner:
         ws = session.workflow_state
         total = ws.task_list.total_count if ws and ws.task_list else 0
         completed = ws.task_list.completed_count if ws and ws.task_list else 0
+        files_changed = ws.total_files_changed if ws else 0
         await broadcast("agent.status", {
             "phase": "completed",
-            "detail": f"全部完成：{completed}/{total} 个子任务",
+            "detail": f"全部完成：{completed}/{total} 个子任务，{files_changed} 个文件变更",
         })
         session.phase = Phase.COMPLETED

@@ -68,7 +68,15 @@ def _make_console_broadcast():
     """创建一个将工作流事件打印到终端的彩色广播闭包。"""
 
     # 追踪当前阶段，用于检测阶段切换
-    state = {"current_phase": "", "agent_active": False}
+    state = {
+        "current_phase": "",
+        "agent_active": False,
+        "tool_call_count": 0,
+        "total_tool_calls": 0,
+        "timer": Timer(),
+        "total_timer": Timer(),
+    }
+    state["total_timer"].start()
 
     async def broadcast(event_type: str, payload: dict) -> None:
         if event_type == "agent.status":
@@ -77,7 +85,14 @@ def _make_console_broadcast():
 
             # 检测阶段切换，打印横幅
             if phase != state["current_phase"]:
+                # 如果上一个阶段有计时，显示耗时
+                if state["current_phase"] and state["agent_active"]:
+                    state["timer"].stop()
+                    elapsed = state["timer"].elapsed_str()
+                    print(f"  {dim(f'⏱ 耗时 {elapsed}')}")
                 state["current_phase"] = phase
+                state["timer"] = Timer()  # 新计时器
+                state["timer"].start()
                 print(phase_banner(phase, detail))
 
             print(format_phase_status(phase, detail))
@@ -86,6 +101,7 @@ def _make_console_broadcast():
             name = payload.get("agent_name", "")
             role = payload.get("role", "")
             state["agent_active"] = True
+            state["tool_call_count"] = 0  # 重置当前 agent 的工具调用计数
             print(f"\n{role_label(role, name)} {dim('启动...')}")
 
         elif event_type == "agent.completed":
@@ -96,10 +112,17 @@ def _make_console_broadcast():
             in_tok = usage.get("input_tokens", 0)
             out_tok = usage.get("output_tokens", 0)
             state["agent_active"] = False
+            state["timer"].stop()
 
             label = role_label(role, name)
             tokens = dim(format_token_usage(in_tok, out_tok))
-            print(f"\n{label} {colorize('完成', phase_color('completed'))} ({tokens})")
+            elapsed = dim(f"⏱ {state['timer'].elapsed_str()}")
+            tool_count = state["tool_call_count"]
+            tool_info = dim(f"🔧 {tool_count} 次工具调用") if tool_count > 0 else ""
+            parts = [f"\n{label} {colorize('完成', phase_color('completed'))} ({tokens}) ({elapsed})"]
+            if tool_info:
+                parts.append(tool_info)
+            print(" · ".join(parts))
             if summary:
                 print(f"  {dim('摘要:')} {summary}")
 
@@ -122,11 +145,14 @@ def _make_console_broadcast():
             name = payload.get("name", "")
             stage = payload.get("stage", "")
             if stage == "running":
+                state["tool_call_count"] += 1
+                state["total_tool_calls"] += 1
                 args = payload.get("args", {})
                 if isinstance(args, dict):
                     # 过滤掉 result 键
                     args = {k: v for k, v in args.items() if k != "result"}
-                print(format_tool_call_start(name, args if isinstance(args, dict) else None))
+                num = state["tool_call_count"]
+                print(format_tool_call_start(name, args if isinstance(args, dict) else None, num))
             elif stage == "completed":
                 success = payload.get("success", False)
                 print(format_tool_call_result(name, success))
@@ -480,7 +506,9 @@ async def _run_workflow_loop(
         if ws and ws.last_review_report:
             _print_review_report(ws.last_review_report)
 
-        choice = input(f"\n{colorize('审查不通过', phase_color('reviewing'))}，是否重新编码？({bold('y')}=重试 / {bold('s')}=跳过 / {bold('n')}=取消): ").strip().lower()
+        retry_count = ws.retry_count if ws else 0
+        retry_info = f" {colorize(f'(第 {retry_count} 次重试)', phase_color('reviewing'))}" if retry_count > 0 else ""
+        choice = input(f"\n{colorize('审查不通过', phase_color('reviewing'))}{retry_info}，是否重新编码？({bold('y')}=重试 / {bold('s')}=跳过 / {bold('n')}=取消): ").strip().lower()
         if choice in ("y", "yes", "重试"):
             await runner.handle_user_command(session, "retry", broadcast)
             try:
@@ -521,8 +549,27 @@ async def _run_workflow_loop(
         ws = session.workflow_state
         total = ws.task_list.total_count if ws and ws.task_list else 0
         completed = ws.task_list.completed_count if ws and ws.task_list else 0
+        files_changed = ws.total_files_changed if ws else 0
+        skipped = sum(1 for t in ws.task_list.tasks if t.status == "skipped") if ws and ws.task_list else 0
+
         print(f"  {colorize(phase_icon('completed'), phase_color('completed'))} {bold('工作流完成！')}")
         print(f"  {bold('进度：')} {progress_bar(completed, total)}")
+        if files_changed > 0:
+            print(f"  {bold('文件变更：')} {colorize(str(files_changed), phase_color('coding'))} 个文件")
+        if skipped > 0:
+            print(f"  {bold('跳过任务：')} {colorize(str(skipped), phase_color('error'))} 个")
+        # 逐任务状态摘要
+        if ws and ws.task_list:
+            print(f"\n  {bold('任务明细：')}")
+            for i, task in enumerate(ws.task_list.tasks, 1):
+                status_map = {
+                    "done": ("✓", phase_color("completed")),
+                    "skipped": ("-", phase_color("error")),
+                    "pending": ("○", phase_color("init")),
+                    "in_progress": ("→", phase_color("coding")),
+                }
+                mark, color = status_map.get(task.status, ("○", phase_color("init")))
+                print(f"    {colorize(f'{mark} {i}.', color)} {task.title}")
     elif session.phase == Phase.ERROR:
         print(f"  {colorize(phase_icon('error'), phase_color('error'))} {bold('工作流执行出错。')}")
     else:
