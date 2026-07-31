@@ -478,7 +478,7 @@ class WorkflowRunner:
 
         ws = session.workflow_state
         diff = ws.current_diff_set if ws else None
-        review_message = self._build_reviewer_message(diff)
+        review_message = self._build_reviewer_message(diff, session)
 
         await broadcast("agent.status", {
             "phase": "reviewing",
@@ -523,7 +523,10 @@ class WorkflowRunner:
 
     @staticmethod
     def _build_coder_message(task: SubTask, session: Session) -> str:
-        """构建给 coder 的任务指令消息。"""
+        """构建给 coder 的任务指令消息。
+
+        包含阶段间上下文传递：planner 方案概述、已完成任务清单。
+        """
         parts = [f"请完成以下编码任务：\n\n任务标题：{task.title}"]
         if task.description:
             parts.append(f"任务描述：{task.description}")
@@ -531,6 +534,21 @@ class WorkflowRunner:
             parts.append(f"涉及文件：{', '.join(task.files_involved)}")
         if task.acceptance_criteria:
             parts.append(f"验收标准：{task.acceptance_criteria}")
+
+        # 阶段间上下文传递：注入 planner 方案概述
+        ws = session.workflow_state
+        if ws and ws.task_list:
+            if ws.task_list.overview:
+                parts.append(f"\n（方案概述：{ws.task_list.overview}）")
+            # 已完成任务清单（让 coder 知道前序进度，避免重复劳动）
+            if ws.completed_tasks:
+                completed_titles = []
+                for tid in ws.completed_tasks:
+                    t = next((t for t in ws.task_list.tasks if t.id == tid), None)
+                    completed_titles.append(t.title if t else tid)
+                parts.append(
+                    f"（已完成任务：{', '.join(completed_titles)}）"
+                )
 
         # 如果有审查反馈（FEEDBACK 阶段重试），附加到消息末尾
         if session.coder_guidance_queue:
@@ -541,12 +559,28 @@ class WorkflowRunner:
         return "\n".join(parts)
 
     @staticmethod
-    def _build_reviewer_message(diff: DiffSet | None) -> str:
-        """构建给 reviewer 的审查指令消息。"""
+    def _build_reviewer_message(diff: DiffSet | None, session: Session | None = None) -> str:
+        """构建给 reviewer 的审查指令消息。
+
+        包含阶段间上下文传递：当前任务上下文、已完成任务进度。
+        """
         if diff is None:
             return "请审查最近的代码变更。"
 
         parts = ["请审查以下代码变更："]
+
+        # 阶段间上下文传递：注入当前任务上下文
+        if session and session.workflow_state:
+            ws = session.workflow_state
+            if ws.current_task:
+                parts.append(f"\n审查目标任务：{ws.current_task.title}")
+                if ws.current_task.acceptance_criteria:
+                    parts.append(f"验收标准：{ws.current_task.acceptance_criteria}")
+            if ws.completed_tasks:
+                parts.append(
+                    f"（前序已完成 {len(ws.completed_tasks)} 个任务）"
+                )
+
         if diff.summary:
             parts.append(f"\n变更摘要：{diff.summary}")
         parts.append(f"变更文件数：{diff.files_changed}")

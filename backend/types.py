@@ -143,6 +143,7 @@ class Session:
     last_active_at: float = 0.0
     events: list[dict] = field(default_factory=list)  # 持久化的 timeline 事件
     workflow_state: Any = None  # WorkflowState | None（避免循环导入）
+    repo_map: str | None = None  # 项目结构地图（运行时缓存，不持久化）
 
     def __post_init__(self):
         now = time.time()

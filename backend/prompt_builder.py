@@ -161,6 +161,45 @@ shell 命令必须遵守配置的审批规则。不要将工作委派给其他 A
 # ─── 阶段感知提示词注入 ───
 
 
+def _repo_map_block(session: Session) -> str:
+    """从 session.repo_map 生成项目结构地图注入段落。"""
+    repo_map = getattr(session, "repo_map", None)
+    if not repo_map:
+        return ""
+    return f"\n项目结构地图：\n{repo_map}\n"
+
+
+def _completed_tasks_block(session: Session) -> str:
+    """构建已完成任务摘要，供 coder/reviewer 了解前序进度。"""
+    ws = session.workflow_state
+    if ws is None or ws.task_list is None or not ws.completed_tasks:
+        return ""
+    tl = ws.task_list
+    lines = [f"已完成的子任务（{len(ws.completed_tasks)}/{tl.total_count}）："]
+    for tid in ws.completed_tasks:
+        # 从 task_list 中查找标题
+        task = next((t for t in tl.tasks if t.id == tid), None)
+        title = task.title if task else tid
+        lines.append(f"  - {tid}: {title}")
+    return "\n" + "\n".join(lines) + "\n"
+
+
+def _plan_overview_block(session: Session) -> str:
+    """注入 planner 产出的方案概述和风险，供 coder/reviewer 理解全局目标。"""
+    ws = session.workflow_state
+    if ws is None or ws.task_list is None:
+        return ""
+    tl = ws.task_list
+    parts: list[str] = []
+    if tl.overview:
+        parts.append(f"方案概述：{tl.overview}")
+    if tl.risks:
+        parts.append("风险提示：" + "；".join(tl.risks))
+    if not parts:
+        return ""
+    return "\n全局上下文：\n" + "\n".join(parts) + "\n"
+
+
 def build_phase_prompt(
     session: Session,
     agent_def: AgentDefinition | None,
@@ -169,14 +208,21 @@ def build_phase_prompt(
     """构建阶段感知的系统提示词。
 
     在 base system prompt 之上，根据当前工作流阶段注入上下文：
+    - 所有阶段：注入 repo_map（项目结构地图）
     - PLANNING：引导产出结构化 TaskList
-    - CODING：注入当前 SubTask 详情
-    - REVIEWING：注入待审查的 DiffSet
+    - CODING：注入当前 SubTask 详情 + planner 方案概述 + 已完成任务
+    - REVIEWING：注入待审查的 DiffSet + 任务上下文 + 已完成任务
     - FEEDBACK：注入审查反馈（供 coder 重试）
 
-    非工作流阶段或缺失 workflow_state 时，返回 base prompt。
+    非工作流阶段或缺失 workflow_state 时，返回 base prompt + repo_map。
     """
     base = build_system_prompt(session, agent_def)
+
+    # 所有工作流阶段都注入 repo_map
+    repo_block = _repo_map_block(session)
+    if repo_block:
+        base += repo_block
+
     ws = session.workflow_state
 
     if phase == Phase.PLANNING:
@@ -192,6 +238,16 @@ def build_phase_prompt(
     if phase == Phase.CODING:
         if ws is None or ws.current_task is None:
             return base
+
+        # 阶段间上下文传递：planner 产出 → coder 消费
+        plan_block = _plan_overview_block(session)
+        if plan_block:
+            base += plan_block
+
+        completed_block = _completed_tasks_block(session)
+        if completed_block:
+            base += completed_block
+
         task = ws.current_task
         task_block = (
             f"\n\n当前阶段：编码实现。\n"
@@ -214,6 +270,25 @@ def build_phase_prompt(
     if phase == Phase.REVIEWING:
         if ws is None or ws.current_diff_set is None:
             return base
+
+        # 阶段间上下文传递：planner 方案概述 + 当前任务上下文
+        plan_block = _plan_overview_block(session)
+        if plan_block:
+            base += plan_block
+
+        completed_block = _completed_tasks_block(session)
+        if completed_block:
+            base += completed_block
+
+        # 当前任务上下文（让 reviewer 知道在审查什么任务）
+        if ws.current_task:
+            base += (
+                f"\n当前审查的任务：{ws.current_task.title}\n"
+                f"任务描述：{ws.current_task.description}\n"
+            )
+            if ws.current_task.acceptance_criteria:
+                base += f"验收标准：{ws.current_task.acceptance_criteria}\n"
+
         diff = ws.current_diff_set
         diff_text = diff.combined_diff[:8000] if diff.combined_diff else ""
         review_block = (
@@ -231,6 +306,12 @@ def build_phase_prompt(
     if phase == Phase.FEEDBACK:
         if ws is None or ws.last_review_report is None:
             return base
+
+        # FEEDBACK 阶段也注入已完成任务上下文
+        completed_block = _completed_tasks_block(session)
+        if completed_block:
+            base += completed_block
+
         report = ws.last_review_report
         feedback_block = (
             f"\n\n当前阶段：根据审查反馈修改代码。\n"

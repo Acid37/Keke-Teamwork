@@ -19,6 +19,7 @@ from backend.context_builder import build_project_context
 from backend.delegate_runner import DelegateRunner
 from backend.model_resolver import ModelResolver
 from backend.prompt_builder import build_phase_prompt, build_system_prompt
+from backend.workflow.repo_map import build_repo_map
 from backend.research_runner import ResearchRunner
 from backend.safety.file_staging import FileStagingArea
 from backend.safety.permission import PermissionManager
@@ -192,6 +193,14 @@ class AgentOrchestrator:
         agent_def = self._resolve_agent(agent_id)
         if not agent_def:
             raise ValueError(f"Agent '{agent_id}' not found")
+
+        # 懒构建 repo_map（首次调用时扫描项目结构，后续从 session 缓存读取）
+        if session.repo_map is None:
+            try:
+                session.repo_map = build_repo_map(session.work_dir)
+            except Exception:
+                logger.debug("repo_map 构建失败", exc_info=True)
+                session.repo_map = ""
 
         aid, aname, arole, acolor = (
             agent_def.agent_id, agent_def.name, agent_def.role, agent_def.color)
