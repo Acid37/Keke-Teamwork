@@ -247,7 +247,7 @@ def _print_workflow_progress(session: Session) -> None:
 
 
 def _list_sessions(config: AppConfig) -> int:
-    """列出所有可恢复的会话（彩色）。"""
+    """列出所有可恢复的会话（彩色，按最近活跃排序）。"""
     session_store = SessionStore(config.data_dir)
     sessions = session_store.list_sessions()
 
@@ -255,21 +255,26 @@ def _list_sessions(config: AppConfig) -> int:
         print(f"  {dim('没有可恢复的会话。')}")
         return 0
 
-    print("\n" + banner("可恢复的会话"))
+    # 按最近活跃时间降序排列
+    sessions.sort(key=lambda s: s.get("last_active_at", 0), reverse=True)
 
-    for s in sessions:
+    print(f"\n{banner('可恢复的会话')}")
+    print(f"  {dim(f'共 {len(sessions)} 个会话')}\n")
+
+    for i, s in enumerate(sessions, 1):
         sid = s["session_id"]
         title = s.get("title", "(未命名)")
         phase = s.get("phase", "unknown")
         ts = s.get("last_active_at", 0)
         ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts)) if ts else "未知"
 
-        print(f"\n  {bold('ID:')}    {colorize(sid, phase_color('planning'))}")
-        print(f"  {bold('标题:')}  {title}")
-        print(f"  {bold('阶段:')}  {colorize(phase, phase_color(phase))}")
-        print(f"  {dim('时间:')}  {ts_str}")
+        print(f"  {colorize(f'{i}.', phase_color('planning'))} {bold('ID:')}    {colorize(sid, phase_color('planning'))}")
+        print(f"     {bold('标题:')}  {title}")
+        print(f"     {bold('阶段:')}  {colorize(phase, phase_color(phase))}")
+        print(f"     {dim('时间:')}  {ts_str}")
+        print()
 
-    print("\n" + separator())
+    print(separator())
     print(f"  {dim('使用 --resume <session-id> 恢复指定会话')}")
     print(separator() + "\n")
 
