@@ -720,6 +720,29 @@ body {
   color: var(--text-primary);
 }
 
+/* Workflow mode toggle */
+.btn-icon.workflow-toggle {
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  transition: all 0.2s;
+}
+
+.btn-icon.workflow-toggle:hover {
+  color: var(--accent);
+  background: rgba(74, 158, 255, 0.08);
+}
+
+.btn-icon.workflow-toggle.active {
+  color: var(--accent);
+  background: rgba(74, 158, 255, 0.12);
+  box-shadow: 0 0 0 1px rgba(74, 158, 255, 0.2);
+}
+
+.btn-icon.workflow-toggle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .btn-send {
   background: var(--accent);
   border: none;
@@ -4104,4 +4127,259 @@ body {
 .perm-check input[type="checkbox"] {
   width: auto;
   margin: 0;
+}
+
+/* ===== Workflow Timeline ===== */
+
+.workflow-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+}
+
+.wf-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+
+.wf-card:hover {
+  border-color: var(--outline-variant);
+}
+
+.wf-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.wf-card-header:not([onClick]) {
+  cursor: default;
+}
+
+.wf-card-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.wf-card-body {
+  padding: 0 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Badge */
+.wf-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border-radius: var(--radius-full);
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+.wf-badge.warn {
+  background: rgba(255, 152, 0, 0.15);
+  color: #ff9800;
+}
+
+/* Overview */
+.wf-overview {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Task list */
+.wf-task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wf-task-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s;
+}
+
+.wf-task-item.current {
+  background: rgba(74, 158, 255, 0.08);
+}
+
+.wf-task-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding-top: 1px;
+}
+
+.wf-task-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wf-task-title {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.wf-task-desc {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* Risks */
+.wf-risks {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  background: rgba(255, 152, 0, 0.08);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  color: #ff9800;
+}
+
+/* Actions */
+.wf-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.wf-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.wf-btn:hover {
+  border-color: var(--outline-variant);
+  background: var(--bg-hover);
+}
+
+.wf-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.wf-btn.primary:hover {
+  opacity: 0.9;
+}
+
+.wf-btn.danger {
+  background: rgba(244, 67, 54, 0.1);
+  border-color: rgba(244, 67, 54, 0.3);
+  color: #f44336;
+}
+
+.wf-btn.danger:hover {
+  background: rgba(244, 67, 54, 0.2);
+}
+
+.wf-btn.warn {
+  background: rgba(255, 152, 0, 0.1);
+  border-color: rgba(255, 152, 0, 0.3);
+  color: #ff9800;
+}
+
+.wf-btn.warn:hover {
+  background: rgba(255, 152, 0, 0.2);
+}
+
+.wf-btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  padding: 4px 8px;
+}
+
+.wf-btn.ghost:hover {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+}
+
+.wf-undo-btn {
+  align-self: flex-start;
+  margin-left: 4px;
+}
+
+/* Review */
+.wf-review-summary {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Action card */
+.wf-action-card .wf-card-body {
+  align-items: center;
+}
+
+.wf-action-prompt {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+/* Completion stats */
+.wf-stats {
+  display: flex;
+  gap: 24px;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.wf-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.wf-stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.wf-stat-label {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+
+/* Progress card spinner */
+.wf-progress-card .spinner {
+  animation: spin 0.8s linear infinite;
 }

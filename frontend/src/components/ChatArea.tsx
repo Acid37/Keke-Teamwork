@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSession } from '../SessionContext';
 import { MessageBubble } from './MessageBubble';
 import { Timeline } from './Timeline';
+import { WorkflowTimeline } from './WorkflowTimeline';
 import { DirectoryPicker } from './DirectoryPicker';
 import { ApprovalDialog } from './ApprovalDialog';
 import { Loader2, FolderOpen, Folder, Shield, Zap, User } from 'lucide-react';
@@ -100,8 +101,12 @@ export function ChatArea() {
           {state.phase === 'researching' && <span>正在研究代码库...</span>}
           {state.phase === 'thinking' && <span>正在规划方案...</span>}
           {state.phase === 'coding' && <span>正在编写代码...</span>}
+          {state.phase === 'planning' && <span>正在分析需求并拆解任务...</span>}
+          {state.phase === 'reviewing' && <span>正在审查代码变更...</span>}
         </div>
       )}
+
+      <WorkflowTimeline />
 
       {state.timelineEvents.length > 0 && (
         <Timeline events={state.timelineEvents} />

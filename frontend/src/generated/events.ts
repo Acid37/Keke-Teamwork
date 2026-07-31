@@ -27,6 +27,11 @@ export const HANDOFF_FAILED = "handoff.failed";
 export const APPROVAL_REQUEST = "approval.request";
 export const ERROR = "error";
 export const BROWSE_DIRECTORY_RESULT = "browse.directory_result";
+export const WORKFLOW_PLAN_SHOWN = "workflow.plan_shown";
+export const WORKFLOW_TASK_STARTED = "workflow.task_started";
+export const WORKFLOW_TASK_COMPLETED = "workflow.task_completed";
+export const WORKFLOW_REVIEW_RESULT = "workflow.review_result";
+export const WORKFLOW_COMPLETED = "workflow.completed";
 
 // ─── Payload 接口 ───
 
@@ -206,6 +211,46 @@ export interface BROWSE_DIRECTORY_RESULTPayload {
   error?: string | null;
 }
 
+export interface WORKFLOW_PLAN_SHOWNPayload {
+  overview: string;
+  tasks: Record<string, unknown>[];
+  risks: string[];
+  total_count: number;
+}
+
+export interface WORKFLOW_TASK_STARTEDPayload {
+  task_id: string;
+  title: string;
+  description: string;
+  task_index: number;
+  total_count: number;
+  retry_count: number;
+}
+
+export interface WORKFLOW_TASK_COMPLETEDPayload {
+  task_id: string;
+  title: string;
+  status: string;
+  files_changed: number;
+  completed_count: number;
+  total_count: number;
+}
+
+export interface WORKFLOW_REVIEW_RESULTPayload {
+  task_id: string;
+  verdict: string;
+  summary: string;
+  should_retry: boolean;
+  retry_count: number;
+}
+
+export interface WORKFLOW_COMPLETEDPayload {
+  total_count: number;
+  completed_count: number;
+  skipped_count: number;
+  files_changed: number;
+}
+
 // ─── EventMap：事件类型 → payload ───
 
 export interface EventMap {
@@ -230,6 +275,11 @@ export interface EventMap {
   "approval.request": APPROVAL_REQUESTPayload;
   "error": ERRORPayload;
   "browse.directory_result": BROWSE_DIRECTORY_RESULTPayload;
+  "workflow.plan_shown": WORKFLOW_PLAN_SHOWNPayload;
+  "workflow.task_started": WORKFLOW_TASK_STARTEDPayload;
+  "workflow.task_completed": WORKFLOW_TASK_COMPLETEDPayload;
+  "workflow.review_result": WORKFLOW_REVIEW_RESULTPayload;
+  "workflow.completed": WORKFLOW_COMPLETEDPayload;
 }
 
 // ─── 辅助类型 ───

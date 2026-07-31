@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { TimelineEvent } from '../types';
-import { ChevronDown, ChevronUp, Search, GitBranch, CheckCircle2, XCircle, AlertCircle, UserPlus, UserCheck } from 'lucide-react';
+import { ChevronDown, ChevronUp, Search, GitBranch, CheckCircle2, XCircle, AlertCircle, UserPlus, UserCheck, ListChecks, FileCode, Flag, ClipboardCheck } from 'lucide-react';
 
 interface TimelineProps {
   events: TimelineEvent[];
@@ -16,6 +16,11 @@ const ICONS: Record<string, typeof Search> = {
   'handoff.failed': XCircle,
   'agent.started': UserPlus,
   'agent.completed': UserCheck,
+  'workflow.plan_shown': ListChecks,
+  'workflow.task_started': FileCode,
+  'workflow.task_completed': CheckCircle2,
+  'workflow.review_result': ClipboardCheck,
+  'workflow.completed': Flag,
 };
 
 const LABELS: Record<string, string> = {
@@ -28,6 +33,11 @@ const LABELS: Record<string, string> = {
   'handoff.failed': '交接失败',
   'agent.started': 'Agent 启动',
   'agent.completed': 'Agent 完成',
+  'workflow.plan_shown': '任务计划',
+  'workflow.task_started': '任务开始',
+  'workflow.task_completed': '任务完成',
+  'workflow.review_result': '审查结果',
+  'workflow.completed': '工作流完成',
 };
 
 function formatTime(ts: number): string {

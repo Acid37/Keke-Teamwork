@@ -252,7 +252,57 @@ export interface SessionInfo {
   work_dir?: string;
 }
 
-export type Phase = 'init' | 'researching' | 'thinking' | 'coding' | 'ready' | 'error';
+export type Phase = 'init' | 'researching' | 'thinking' | 'coding' | 'ready' | 'error'
+  | 'planning' | 'plan_review' | 'code_review' | 'reviewing' | 'feedback' | 'completed';
+
+// ─── 工作流引擎类型 ───
+
+export interface WorkflowTask {
+  id: string;
+  title: string;
+  description: string;
+  status: 'pending' | 'in_progress' | 'done' | 'skipped';
+}
+
+export interface WorkflowPlan {
+  overview: string;
+  tasks: WorkflowTask[];
+  risks: string[];
+  total_count: number;
+}
+
+export interface WorkflowTaskProgress {
+  task_id: string;
+  title: string;
+  description: string;
+  task_index: number;
+  total_count: number;
+  retry_count: number;
+}
+
+export interface WorkflowTaskResult {
+  task_id: string;
+  title: string;
+  status: 'done' | 'skipped';
+  files_changed: number;
+  completed_count: number;
+  total_count: number;
+}
+
+export interface WorkflowReviewResult {
+  task_id: string;
+  verdict: 'approved' | 'needs_changes' | 'rejected';
+  summary: string;
+  should_retry: boolean;
+  retry_count: number;
+}
+
+export interface WorkflowCompleted {
+  total_count: number;
+  completed_count: number;
+  skipped_count: number;
+  files_changed: number;
+}
 
 // ─── 结构化时间线事件 ───
 
@@ -265,7 +315,12 @@ export type TimelineEventType =
   | 'handoff.completed'
   | 'handoff.failed'
   | 'agent.started'
-  | 'agent.completed';
+  | 'agent.completed'
+  | 'workflow.plan_shown'
+  | 'workflow.task_started'
+  | 'workflow.task_completed'
+  | 'workflow.review_result'
+  | 'workflow.completed';
 
 export interface TimelineEvent {
   id: string;
@@ -280,6 +335,12 @@ export interface TimelineEvent {
   error?: string;
   timed_out?: boolean;
   timestamp: number;
+  // 工作流事件附加字段
+  workflow_plan?: WorkflowPlan;
+  workflow_task_progress?: WorkflowTaskProgress;
+  workflow_task_result?: WorkflowTaskResult;
+  workflow_review?: WorkflowReviewResult;
+  workflow_completed?: WorkflowCompleted;
 }
 
 // Appearance configuration (mirrors backend AppearanceConfig)

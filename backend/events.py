@@ -62,6 +62,13 @@ ERROR = "error"
 # 目录浏览
 BROWSE_DIRECTORY_RESULT = "browse.directory_result"
 
+# 工作流引擎
+WORKFLOW_PLAN_SHOWN = "workflow.plan_shown"
+WORKFLOW_TASK_STARTED = "workflow.task_started"
+WORKFLOW_TASK_COMPLETED = "workflow.task_completed"
+WORKFLOW_REVIEW_RESULT = "workflow.review_result"
+WORKFLOW_COMPLETED = "workflow.completed"
+
 
 # ─── 事件基类 ───
 
@@ -367,6 +374,78 @@ class BrowseDirectoryResultEvent(WSEvent):
     error: str | None = None
 
 
+# ─── 工作流引擎 ───
+
+
+@dataclass
+class WorkflowTaskItem:
+    """工作流子任务摘要（用于事件 payload）。"""
+    id: str
+    title: str
+    description: str = ""
+    status: str = "pending"  # pending | in_progress | done | skipped
+
+
+@dataclass
+class WorkflowPlanShownEvent(WSEvent):
+    """Planner 产出任务计划后广播，供前端展示计划等待用户确认。"""
+    _event_type: str = field(default=WORKFLOW_PLAN_SHOWN, repr=False, compare=False)
+
+    overview: str = ""
+    tasks: list[dict] = field(default_factory=list)  # WorkflowTaskItem 序列化
+    risks: list[str] = field(default_factory=list)
+    total_count: int = 0
+
+
+@dataclass
+class WorkflowTaskStartedEvent(WSEvent):
+    """某个子任务开始编码时广播。"""
+    _event_type: str = field(default=WORKFLOW_TASK_STARTED, repr=False, compare=False)
+
+    task_id: str = ""
+    title: str = ""
+    description: str = ""
+    task_index: int = 0  # 从 1 开始
+    total_count: int = 0
+    retry_count: int = 0
+
+
+@dataclass
+class WorkflowTaskCompletedEvent(WSEvent):
+    """某个子任务完成（通过/跳过）时广播。"""
+    _event_type: str = field(default=WORKFLOW_TASK_COMPLETED, repr=False, compare=False)
+
+    task_id: str = ""
+    title: str = ""
+    status: str = "done"  # done | skipped
+    files_changed: int = 0
+    completed_count: int = 0
+    total_count: int = 0
+
+
+@dataclass
+class WorkflowReviewResultEvent(WSEvent):
+    """Reviewer 审查结果广播。"""
+    _event_type: str = field(default=WORKFLOW_REVIEW_RESULT, repr=False, compare=False)
+
+    task_id: str = ""
+    verdict: str = "approved"  # approved | needs_changes | rejected
+    summary: str = ""
+    should_retry: bool = False
+    retry_count: int = 0
+
+
+@dataclass
+class WorkflowCompletedEvent(WSEvent):
+    """整个工作流完成时广播。"""
+    _event_type: str = field(default=WORKFLOW_COMPLETED, repr=False, compare=False)
+
+    total_count: int = 0
+    completed_count: int = 0
+    skipped_count: int = 0
+    files_changed: int = 0
+
+
 # ─── 事件注册表（供 export_schema 使用）───
 
 EVENT_REGISTRY: dict[str, type[WSEvent]] = {
@@ -391,4 +470,9 @@ EVENT_REGISTRY: dict[str, type[WSEvent]] = {
     APPROVAL_REQUEST: ApprovalRequestEvent,
     ERROR: ErrorEvent,
     BROWSE_DIRECTORY_RESULT: BrowseDirectoryResultEvent,
+    WORKFLOW_PLAN_SHOWN: WorkflowPlanShownEvent,
+    WORKFLOW_TASK_STARTED: WorkflowTaskStartedEvent,
+    WORKFLOW_TASK_COMPLETED: WorkflowTaskCompletedEvent,
+    WORKFLOW_REVIEW_RESULT: WorkflowReviewResultEvent,
+    WORKFLOW_COMPLETED: WorkflowCompletedEvent,
 }

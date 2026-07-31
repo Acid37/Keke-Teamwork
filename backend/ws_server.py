@@ -21,6 +21,7 @@ from backend.orchestrator import AgentOrchestrator
 from backend.safety.permission import PermissionManager
 from backend.session import SessionStore
 from backend.tools import ALL_TOOLS
+from backend.workflow.engine import WorkflowRunner
 from backend.types import (
     AgentDefinition,
     AgentPermissions,
@@ -51,6 +52,9 @@ class WebSocketServer:
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._permission_managers: dict[str, PermissionManager] = {}
         self._orchestrator = self._create_orchestrator()
+        self._workflow_runner = WorkflowRunner(
+            self._orchestrator, self._agent_store, self._store,
+        )
 
     @staticmethod
     def _create_llm(config: AppConfig) -> LLMClient:
@@ -83,6 +87,9 @@ class WebSocketServer:
         self._llm = self._create_llm(self._config)
         self._llm_factory.invalidate()
         self._orchestrator = self._create_orchestrator()
+        self._workflow_runner = WorkflowRunner(
+            self._orchestrator, self._agent_store, self._store,
+        )
 
     def _create_orchestrator(self) -> AgentOrchestrator:
         return AgentOrchestrator(
@@ -852,6 +859,33 @@ class WebSocketServer:
                                         bool(payload.get("approved", False)),
                                     )
 
+                        case "workflow.start":
+                            if not session:
+                                await self._send_error(ws, "No active session")
+                                continue
+                            task_text = payload.get("text", "")
+                            if task_text:
+                                task = asyncio.create_task(
+                                    self._handle_workflow_start(
+                                        ws, session, task_text
+                                    )
+                                )
+                                self._running_tasks[session.id] = task
+
+                        case "workflow.command":
+                            if not session:
+                                await self._send_error(ws, "No active session")
+                                continue
+                            command = payload.get("command", "")
+                            user_text = payload.get("text", "")
+                            if command:
+                                task = asyncio.create_task(
+                                    self._handle_workflow_command(
+                                        ws, session, command, user_text
+                                    )
+                                )
+                                self._running_tasks[session.id] = task
+
                         case _:
                             logger.warning(
                                 "Unknown message type: %s", msg_type
@@ -1012,6 +1046,9 @@ class WebSocketServer:
             "research.started", "research.result", "research.failed",
             "research.completed", "handoff.started", "handoff.completed",
             "handoff.failed", "agent.started", "agent.completed",
+            "workflow.plan_shown", "workflow.task_started",
+            "workflow.task_completed", "workflow.review_result",
+            "workflow.completed",
         }
 
         async def broadcast(event_type: str, payload: dict):
@@ -1057,6 +1094,88 @@ class WebSocketServer:
         if task and not task.done():
             task.cancel()
         logger.info("Interrupt requested for session %s", session.id)
+
+    async def _handle_workflow_start(
+        self, ws: WebSocket, session: Session, task_text: str,
+    ) -> None:
+        """Start a new workflow execution."""
+        _TIMELINE_EVENT_TYPES = {
+            "research.started", "research.result", "research.failed",
+            "research.completed", "handoff.started", "handoff.completed",
+            "handoff.failed", "agent.started", "agent.completed",
+            "workflow.plan_shown", "workflow.task_started",
+            "workflow.task_completed", "workflow.review_result",
+            "workflow.completed",
+        }
+
+        async def broadcast(event_type: str, payload: dict):
+            await self._send(ws, event_type, payload)
+            if event_type in _TIMELINE_EVENT_TYPES:
+                session.events.append({
+                    "type": event_type,
+                    "payload": payload,
+                    "timestamp": time.time(),
+                })
+
+        try:
+            session.messages.append({"role": "user", "content": task_text})
+            await self._workflow_runner.execute(session, task_text, broadcast)
+        except asyncio.CancelledError:
+            logger.info("Workflow start cancelled for session %s", session.id)
+        except Exception as e:
+            logger.exception("Workflow execution failed")
+            session.phase = Phase.ERROR
+            await self._send_error(ws, f"Workflow error: {e}")
+        finally:
+            self._store.save(session)
+            await self._send(ws, "session.list", {
+                "sessions": self._store.list_sessions(),
+            })
+            if session.id in self._running_tasks:
+                self._running_tasks.pop(session.id, None)
+
+    async def _handle_workflow_command(
+        self, ws: WebSocket, session: Session, command: str, user_text: str,
+    ) -> None:
+        """Handle a workflow command from the frontend."""
+        _TIMELINE_EVENT_TYPES = {
+            "research.started", "research.result", "research.failed",
+            "research.completed", "handoff.started", "handoff.completed",
+            "handoff.failed", "agent.started", "agent.completed",
+            "workflow.plan_shown", "workflow.task_started",
+            "workflow.task_completed", "workflow.review_result",
+            "workflow.completed",
+        }
+
+        async def broadcast(event_type: str, payload: dict):
+            await self._send(ws, event_type, payload)
+            if event_type in _TIMELINE_EVENT_TYPES:
+                session.events.append({
+                    "type": event_type,
+                    "payload": payload,
+                    "timestamp": time.time(),
+                })
+
+        try:
+            handled = await self._workflow_runner.handle_user_command(
+                session, command, broadcast, user_text=user_text,
+            )
+            if handled:
+                # Command was processed, continue the workflow loop
+                await self._workflow_runner.execute(session, "", broadcast)
+        except asyncio.CancelledError:
+            logger.info("Workflow command cancelled for session %s", session.id)
+        except Exception as e:
+            logger.exception("Workflow command failed")
+            session.phase = Phase.ERROR
+            await self._send_error(ws, f"Workflow command error: {e}")
+        finally:
+            self._store.save(session)
+            await self._send(ws, "session.list", {
+                "sessions": self._store.list_sessions(),
+            })
+            if session.id in self._running_tasks:
+                self._running_tasks.pop(session.id, None)
 
     # ─── Helpers ───
 

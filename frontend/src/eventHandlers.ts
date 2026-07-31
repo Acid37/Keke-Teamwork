@@ -9,7 +9,7 @@
  */
 
 import type { Dispatch } from 'react';
-import type { Message, ToolCallInfo, TimelineEvent, PersistedTimelineEvent } from './types';
+import type { Message, ToolCallInfo, TimelineEvent, PersistedTimelineEvent, WorkflowPlan, WorkflowTaskProgress, WorkflowTaskResult, WorkflowReviewResult, WorkflowCompleted } from './types';
 import type { Action, SessionState } from './SessionContext';
 import type { EventMap, EventType } from './generated/events';
 
@@ -139,7 +139,9 @@ const onSessionTitleUpdated: Handler<'session.title.updated'> = (ctx, p) => {
 
 const onAgentStatus: Handler<'agent.status'> = (ctx, p) => {
   ctx.dispatch({ type: 'SET_PHASE', phase: p.phase as SessionState['phase'] });
-  if (p.phase === 'ready') {
+  // Phases where agent/workflow is idle or paused waiting for user input
+  const idlePhases = ['ready', 'completed', 'error', 'init', 'plan_review', 'code_review', 'feedback'];
+  if (idlePhases.includes(p.phase)) {
     ctx.dispatch({ type: 'SET_PROCESSING', isProcessing: false });
     ctx.dispatch({ type: 'SET_STREAMING_ID', messageId: null });
   } else {
@@ -405,6 +407,111 @@ const onBrowseDirectoryResult: Handler<'browse.directory_result'> = (_ctx, _p) =
   // 保留 handler 以满足类型完整性
 };
 
+// ─── 工作流引擎 ───
+
+const onWorkflowPlanShown: Handler<'workflow.plan_shown'> = (ctx, p) => {
+  const plan: WorkflowPlan = {
+    overview: p.overview,
+    tasks: (p.tasks as unknown as WorkflowPlan['tasks']) || [],
+    risks: p.risks || [],
+    total_count: p.total_count,
+  };
+  ctx.dispatch({ type: 'SET_WORKFLOW_PLAN', plan });
+  addTimelineEvent(ctx.dispatch, {
+    type: 'workflow.plan_shown',
+    agent_id: 'planner',
+    agent_name: '方案规划师',
+    agent_color: '#4a9eff',
+    role: 'planner',
+    task: plan.overview,
+    workflow_plan: plan,
+  });
+};
+
+const onWorkflowTaskStarted: Handler<'workflow.task_started'> = (ctx, p) => {
+  const progress: WorkflowTaskProgress = {
+    task_id: p.task_id,
+    title: p.title,
+    description: p.description,
+    task_index: p.task_index,
+    total_count: p.total_count,
+    retry_count: p.retry_count,
+  };
+  ctx.dispatch({ type: 'SET_WORKFLOW_TASK_PROGRESS', progress });
+  addTimelineEvent(ctx.dispatch, {
+    type: 'workflow.task_started',
+    agent_id: 'coder',
+    agent_name: '编码专家',
+    agent_color: '#4caf50',
+    role: 'coder',
+    task: `${p.title}（任务 ${p.task_index}/${p.total_count}${p.retry_count > 0 ? `，重试第${p.retry_count}次` : ''}）`,
+    workflow_task_progress: progress,
+  });
+};
+
+const onWorkflowTaskCompleted: Handler<'workflow.task_completed'> = (ctx, p) => {
+  const result: WorkflowTaskResult = {
+    task_id: p.task_id,
+    title: p.title,
+    status: p.status as 'done' | 'skipped',
+    files_changed: p.files_changed,
+    completed_count: p.completed_count,
+    total_count: p.total_count,
+  };
+  ctx.dispatch({ type: 'SET_WORKFLOW_TASK_RESULT', result });
+  addTimelineEvent(ctx.dispatch, {
+    type: 'workflow.task_completed',
+    agent_id: 'workflow',
+    agent_name: p.status === 'skipped' ? '已跳过' : '已完成',
+    agent_color: p.status === 'skipped' ? '#ff9800' : '#4caf50',
+    task: `${p.title}（${p.completed_count}/${p.total_count}）`,
+    workflow_task_result: result,
+  });
+};
+
+const onWorkflowReviewResult: Handler<'workflow.review_result'> = (ctx, p) => {
+  const review: WorkflowReviewResult = {
+    task_id: p.task_id,
+    verdict: p.verdict as 'approved' | 'needs_changes' | 'rejected',
+    summary: p.summary,
+    should_retry: p.should_retry,
+    retry_count: p.retry_count,
+  };
+  ctx.dispatch({ type: 'SET_WORKFLOW_REVIEW', review });
+  const colorMap: Record<string, string> = {
+    approved: '#4caf50',
+    needs_changes: '#ff9800',
+    rejected: '#f44336',
+  };
+  addTimelineEvent(ctx.dispatch, {
+    type: 'workflow.review_result',
+    agent_id: 'reviewer',
+    agent_name: '代码审查员',
+    agent_color: colorMap[review.verdict] || '#ffc107',
+    role: 'reviewer',
+    task: review.summary,
+    workflow_review: review,
+  });
+};
+
+const onWorkflowCompleted: Handler<'workflow.completed'> = (ctx, p) => {
+  const completed: WorkflowCompleted = {
+    total_count: p.total_count,
+    completed_count: p.completed_count,
+    skipped_count: p.skipped_count,
+    files_changed: p.files_changed,
+  };
+  ctx.dispatch({ type: 'SET_WORKFLOW_COMPLETED', completed });
+  addTimelineEvent(ctx.dispatch, {
+    type: 'workflow.completed',
+    agent_id: 'workflow',
+    agent_name: '工作流完成',
+    agent_color: '#4caf50',
+    task: `完成 ${p.completed_count}/${p.total_count} 个任务，${p.files_changed} 个文件变更`,
+    workflow_completed: completed,
+  });
+};
+
 // ─── 注册表 ───
 
 /**
@@ -434,6 +541,11 @@ export const eventHandlers: { [K in EventType]: Handler<K> } = {
   'approval.request': onApprovalRequest,
   'error': onError,
   'browse.directory_result': onBrowseDirectoryResult,
+  'workflow.plan_shown': onWorkflowPlanShown,
+  'workflow.task_started': onWorkflowTaskStarted,
+  'workflow.task_completed': onWorkflowTaskCompleted,
+  'workflow.review_result': onWorkflowReviewResult,
+  'workflow.completed': onWorkflowCompleted,
 } as const;
 
 // ─── 注册入口 ───

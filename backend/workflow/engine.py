@@ -16,6 +16,13 @@ import time
 from typing import TYPE_CHECKING
 
 from backend.types import Phase, Session
+from backend.events import (
+    WorkflowCompletedEvent,
+    WorkflowPlanShownEvent,
+    WorkflowReviewResultEvent,
+    WorkflowTaskCompletedEvent,
+    WorkflowTaskStartedEvent,
+)
 from backend.workflow.parser import (
     parse_diff_set,
     parse_review_report,
@@ -155,6 +162,15 @@ class WorkflowRunner:
                     self._save_session(session)
                     return
                 session.workflow_state.last_review_report = report
+                # 结构化工作流事件：审查结果
+                ws = session.workflow_state
+                await WorkflowReviewResultEvent(
+                    task_id=report.task_id,
+                    verdict=report.overall_verdict,
+                    summary=report.summary,
+                    should_retry=report.should_retry,
+                    retry_count=ws.retry_count,
+                ).emit(broadcast)
                 if report.should_retry:
                     ws = session.workflow_state
                     ws.retry_count += 1
@@ -172,7 +188,7 @@ class WorkflowRunner:
                         ws.current_diff_set = None
                         ws.last_review_report = None
                         session.coder_guidance_queue.clear()
-                        self._advance_to_next_task(session)
+                        await self._complete_task(session, broadcast, status="skipped")
                         self._save_session(session)
                         continue
                     session.phase = Phase.FEEDBACK
@@ -181,7 +197,7 @@ class WorkflowRunner:
                     self._save_session(session)
                     return
                 # 审查通过 → 推进到下一个子任务
-                self._advance_to_next_task(session)
+                await self._complete_task(session, broadcast)
                 self._save_session(session)
                 # 若还有剩余任务则继续 CODING，否则自动进入 COMPLETED
                 continue
@@ -296,7 +312,7 @@ class WorkflowRunner:
                 "phase": "coding",
                 "detail": "跳过审查，推进到下一个任务...",
             })
-            self._advance_to_next_task(session)
+            await self._complete_task(session, broadcast, status="skipped")
             self._save_session(session)
             return True
 
@@ -328,7 +344,7 @@ class WorkflowRunner:
                 "phase": "coding",
                 "detail": "跳过当前任务，推进到下一个...",
             })
-            self._advance_to_next_task(session)
+            await self._complete_task(session, broadcast, status="skipped")
             self._save_session(session)
             return True
 
@@ -341,6 +357,43 @@ class WorkflowRunner:
             await broadcast("agent.status", {
                 "phase": "error",
                 "detail": "工作流已被用户中止",
+            })
+            self._save_session(session)
+            return True
+
+        # ── undo：CODE_REVIEW / FEEDBACK → 回退上一个已完成任务 ──
+        if command == "undo":
+            if phase not in (Phase.CODE_REVIEW, Phase.FEEDBACK):
+                logger.warning("undo not valid at phase=%s", phase)
+                return False
+            if not ws.completed_tasks:
+                logger.warning("undo: no completed tasks to revert")
+                return False
+
+            # 弹出最后一个完成的任务
+            last_task_id = ws.completed_tasks.pop()
+            # 回退任务索引
+            if ws.task_list and ws.task_list.current_task_index > 0:
+                ws.task_list.current_task_index -= 1
+                # 重置任务状态
+                task = ws.task_list.current_task
+                if task:
+                    task.status = "pending"
+
+            ws.current_diff_set = None
+            ws.last_review_report = None
+            ws.retry_count = 0
+            session.coder_guidance_queue.clear()
+            session.phase = Phase.CODING
+
+            logger.info(
+                "Undo: reverted task %s, back to index %d",
+                last_task_id,
+                ws.task_list.current_task_index if ws.task_list else 0,
+            )
+            await broadcast("agent.status", {
+                "phase": "coding",
+                "detail": f"已撤销任务 {last_task_id}，重新编码...",
             })
             self._save_session(session)
             return True
@@ -445,6 +498,16 @@ class WorkflowRunner:
             "phase": "coding",
             "detail": f"正在执行子任务{index_str}：{task.title}{retry_info}",
         })
+
+        # 结构化工作流事件：任务开始
+        await WorkflowTaskStartedEvent(
+            task_id=task.id,
+            title=task.title,
+            description=task.description,
+            task_index=task_index,
+            total_count=task_total,
+            retry_count=ws.retry_count if ws else 0,
+        ).emit(broadcast)
 
         try:
             result, staging = await self._orchestrator.run_workflow_agent(
@@ -638,6 +701,30 @@ class WorkflowRunner:
 
     # ─── 状态推进 ───
 
+    async def _complete_task(
+        self,
+        session: Session,
+        broadcast: Broadcast,
+        *,
+        status: str = "done",
+    ) -> None:
+        """标记当前任务完成并广播事件，然后推进到下一任务。"""
+        ws = session.workflow_state
+        task = ws.current_task if ws else None
+        files_changed = ws.total_files_changed if ws else 0
+
+        self._advance_to_next_task(session)
+
+        # 广播任务完成事件
+        await WorkflowTaskCompletedEvent(
+            task_id=task.id if task else "",
+            title=task.title if task else "",
+            status=status,
+            files_changed=files_changed,
+            completed_count=len(ws.completed_tasks) if ws else 0,
+            total_count=ws.task_list.total_count if ws and ws.task_list else 0,
+        ).emit(broadcast)
+
     def _advance_to_next_task(self, session: Session) -> None:
         """当前子任务审查通过，推进到下一个任务。"""
         ws = session.workflow_state
@@ -698,7 +785,22 @@ class WorkflowRunner:
             "phase": "plan_review",
             "detail": f"计划已产出：{tl.total_count} 个子任务",
         })
-        # Step 8 前端可视化时扩展为 workflow.plan_shown 事件
+        # 结构化工作流事件：计划展示
+        tasks_serialized = [
+            {
+                "id": t.id,
+                "title": t.title,
+                "description": t.description,
+                "status": t.status,
+            }
+            for t in tl.tasks
+        ]
+        await WorkflowPlanShownEvent(
+            overview=tl.overview,
+            tasks=tasks_serialized,
+            risks=tl.risks,
+            total_count=tl.total_count,
+        ).emit(broadcast)
 
     async def _broadcast_completion(
         self,
@@ -710,8 +812,16 @@ class WorkflowRunner:
         total = ws.task_list.total_count if ws and ws.task_list else 0
         completed = ws.task_list.completed_count if ws and ws.task_list else 0
         files_changed = ws.total_files_changed if ws else 0
+        skipped = total - len(ws.completed_tasks) if ws else 0
         await broadcast("agent.status", {
             "phase": "completed",
             "detail": f"全部完成：{completed}/{total} 个子任务，{files_changed} 个文件变更",
         })
+        # 结构化工作流事件：工作流完成
+        await WorkflowCompletedEvent(
+            total_count=total,
+            completed_count=len(ws.completed_tasks) if ws else 0,
+            skipped_count=max(skipped, 0),
+            files_changed=files_changed,
+        ).emit(broadcast)
         session.phase = Phase.COMPLETED

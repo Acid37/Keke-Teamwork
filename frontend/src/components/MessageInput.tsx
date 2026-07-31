@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Send, Square, ChevronDown } from 'lucide-react';
+import { Send, Square, ChevronDown, Workflow } from 'lucide-react';
 import { useSession } from '../SessionContext';
 import type { AgentDefinition } from '../types';
 
@@ -8,6 +8,7 @@ export function MessageInput() {
   const [text, setText] = useState('');
   const [agents, setAgents] = useState<AgentDefinition[]>([]);
   const [showAgentMenu, setShowAgentMenu] = useState(false);
+  const [workflowMode, setWorkflowMode] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -67,15 +68,18 @@ export function MessageInput() {
       },
     });
 
-    const sendUserMessage = () => {
+    if (!state.sessionId) return;
+
+    if (workflowMode) {
+      // Start workflow instead of normal chat
+      dispatch({ type: 'RESET_WORKFLOW' });
+      sendCommand({ type: 'workflow.start', payload: { text: trimmed } });
+    } else {
       sendCommand({
         type: 'user.message',
         payload: { text: trimmed, agent_id: state.selectedAgentId },
       });
-    };
-
-    if (!state.sessionId) return;
-    sendUserMessage();
+    }
 
     setText('');
     dispatch({ type: 'SET_PROCESSING', isProcessing: true });
@@ -102,7 +106,9 @@ export function MessageInput() {
     ? '正在执行...'
     : !state.sessionId
       ? '请先打开项目或选择会话...'
-    : '输入消息... (Enter 发送, Shift+Enter 换行)';
+    : workflowMode
+      ? '描述任务，工作流将自动拆解、编码、审查... (Enter 发送)'
+      : '输入消息... (Enter 发送, Shift+Enter 换行)';
 
   const canSend = Boolean(text.trim()) && Boolean(state.sessionId) && !state.isProcessing;
 
@@ -162,6 +168,14 @@ export function MessageInput() {
           rows={1}
         />
         <div className="input-actions">
+          <button
+            className={`btn-icon workflow-toggle ${workflowMode ? 'active' : ''}`}
+            onClick={() => setWorkflowMode(!workflowMode)}
+            title={workflowMode ? '工作流模式已开启（点击关闭）' : '切换到工作流模式'}
+            disabled={state.isProcessing}
+          >
+            <Workflow size={18} />
+          </button>
           {state.isProcessing ? (
             <button className="btn-icon stop" onClick={handleStop} title="停止">
               <Square size={18} />

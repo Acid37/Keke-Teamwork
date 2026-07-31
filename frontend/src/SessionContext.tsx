@@ -10,6 +10,11 @@ import {
   WSCommand,
   ActiveAgent,
   TimelineEvent,
+  WorkflowPlan,
+  WorkflowTaskProgress,
+  WorkflowTaskResult,
+  WorkflowReviewResult,
+  WorkflowCompleted,
 } from './types';
 import { registerEventHandlers } from './eventHandlers';
 
@@ -31,6 +36,11 @@ export interface SessionState {
   soloMode: boolean;
   pendingApproval: ApprovalRequestPayload | null;
   timelineEvents: TimelineEvent[];
+  workflowPlan: WorkflowPlan | null;
+  workflowTaskProgress: WorkflowTaskProgress | null;
+  workflowTaskResult: WorkflowTaskResult | null;
+  workflowReview: WorkflowReviewResult | null;
+  workflowCompleted: WorkflowCompleted | null;
 }
 
 // Try-expr for localStorage init
@@ -66,7 +76,13 @@ export type Action =
   | { type: 'SET_PENDING_APPROVAL'; approval: ApprovalRequestPayload | null }
   | { type: 'ADD_TIMELINE_EVENT'; event: TimelineEvent }
   | { type: 'SET_TIMELINE_EVENTS'; events: TimelineEvent[] }
-  | { type: 'CLEAR_TIMELINE' };
+  | { type: 'CLEAR_TIMELINE' }
+  | { type: 'SET_WORKFLOW_PLAN'; plan: WorkflowPlan }
+  | { type: 'SET_WORKFLOW_TASK_PROGRESS'; progress: WorkflowTaskProgress }
+  | { type: 'SET_WORKFLOW_TASK_RESULT'; result: WorkflowTaskResult }
+  | { type: 'SET_WORKFLOW_REVIEW'; review: WorkflowReviewResult }
+  | { type: 'SET_WORKFLOW_COMPLETED'; completed: WorkflowCompleted }
+  | { type: 'RESET_WORKFLOW' };
 
 const initialState: SessionState = {
   sessionId: null,
@@ -86,6 +102,11 @@ const initialState: SessionState = {
   soloMode: false,
   pendingApproval: null,
   timelineEvents: [],
+  workflowPlan: null,
+  workflowTaskProgress: null,
+  workflowTaskResult: null,
+  workflowReview: null,
+  workflowCompleted: null,
 };
 
 function normalizeHistory(history: any[] | undefined): Message[] {
@@ -248,7 +269,7 @@ function reducer(state: SessionState, action: Action): SessionState {
       return { ...state, recentProjects: action.projects };
 
     case 'RESET_SESSION':
-      return { ...state, sessionId: null, messages: [], streamingMessageId: null, currentToolCall: null, isProcessing: false, timelineEvents: [] };
+      return { ...state, sessionId: null, messages: [], streamingMessageId: null, currentToolCall: null, isProcessing: false, timelineEvents: [], workflowPlan: null, workflowTaskProgress: null, workflowTaskResult: null, workflowReview: null, workflowCompleted: null };
 
     case 'SET_AUTO_REVIEW':
       return { ...state, autoReview: action.enabled };
@@ -270,6 +291,31 @@ function reducer(state: SessionState, action: Action): SessionState {
 
     case 'CLEAR_TIMELINE':
       return { ...state, timelineEvents: [] };
+
+    case 'SET_WORKFLOW_PLAN':
+      return { ...state, workflowPlan: action.plan, workflowCompleted: null };
+
+    case 'SET_WORKFLOW_TASK_PROGRESS':
+      return { ...state, workflowTaskProgress: action.progress };
+
+    case 'SET_WORKFLOW_TASK_RESULT':
+      return { ...state, workflowTaskResult: action.result };
+
+    case 'SET_WORKFLOW_REVIEW':
+      return { ...state, workflowReview: action.review };
+
+    case 'SET_WORKFLOW_COMPLETED':
+      return { ...state, workflowCompleted: action.completed };
+
+    case 'RESET_WORKFLOW':
+      return {
+        ...state,
+        workflowPlan: null,
+        workflowTaskProgress: null,
+        workflowTaskResult: null,
+        workflowReview: null,
+        workflowCompleted: null,
+      };
 
     default:
       return state;
