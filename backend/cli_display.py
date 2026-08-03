@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
+import unicodedata
 from typing import IO
 
 # ─── ANSI 颜色码 ───
@@ -48,6 +50,13 @@ def _enable_windows_vt() -> None:
             mode = ctypes.c_uint32()
             if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
                 kernel32.SetConsoleMode(handle, mode.value | 0x0004)
+        # 切换控制台输出代码页为 UTF-8，避免 emoji/箱线字符在 GBK 下崩溃
+        kernel32.SetConsoleOutputCP(65001)
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, ValueError):
+                pass
         _vt_enabled = True
     except Exception:
         _vt_enabled = False
@@ -190,7 +199,7 @@ def banner(title: str, char: str = "=", length: int = 60) -> str:
     """生成标题横幅。"""
     line = char * length
     center = f"  {title}  "
-    pad = (length - len(center)) // 2
+    pad = (length - display_width(center)) // 2
     if pad < 0:
         pad = 0
     center_line = " " * pad + center
@@ -201,11 +210,159 @@ def phase_banner(phase: str, detail: str = "") -> str:
     """生成阶段切换横幅。"""
     icon = phase_icon(phase)
     color = phase_color(phase)
-    line = "─" * 50
-    title = f"  {icon} {phase.upper()}"
+    title = f"{icon} {phase}"
     if detail:
-        title += f" — {detail}"
-    return colorize(line, color) + "\n" + colorize(title, color) + "\n" + colorize(line, color)
+        title += f" · {detail}"
+    line = f"  ── {title} ──"
+    return colorize(line, color)
+
+
+# ─── 面板 / 对齐 ───
+
+
+def display_width(text: str) -> int:
+    """估算文本在终端中的显示宽度。
+
+    CJK 全角字符按 2 列计算，ANSI 转义序列不计入宽度。
+    """
+    plain = re.sub(r"\033\[[0-9;]*m", "", text)
+    width = 0
+    for ch in plain:
+        width += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+    return width
+
+
+def pad_text(text: str, width: int) -> str:
+    """按显示宽度补齐空格（支持 CJK 与 ANSI 混排）。"""
+    return text + " " * max(0, width - display_width(text))
+
+
+_ANSI_CODE_RE = re.compile(r"\033\[[0-9;]*m")
+
+
+def _split_ansi(text: str) -> list[tuple[str, bool]]:
+    """将文本拆分为 (片段, 是否为 ANSI 码) 的令牌序列。"""
+    tokens: list[tuple[str, bool]] = []
+    pos = 0
+    for m in _ANSI_CODE_RE.finditer(text):
+        if m.start() > pos:
+            tokens.append((text[pos:m.start()], False))
+        tokens.append((m.group(0), True))
+        pos = m.end()
+    if pos < len(text):
+        tokens.append((text[pos:], False))
+    return tokens
+
+
+def wrap_text(text: str, width: int) -> list[str]:
+    """按显示宽度折行，尽量在空格处断行。
+
+    支持 ANSI 颜色码混排：折行处自动闭合颜色并在下一行恢复，
+    避免长内容把面板边框撑破或颜色串行。
+    """
+    if display_width(text) <= width:
+        return [text]
+
+    lines: list[str] = []
+    current: list[str] = []
+    current_w = 0
+    open_codes: list[str] = []
+    prev_plain: str = ""
+    current_ansi = False
+
+    def _break_line() -> None:
+        nonlocal current, current_w, prev_plain, current_ansi
+        if current:
+            # 闭合行尾未关闭的颜色码，避免颜色串到下一行
+            lines.append("".join(current) + (_RESET if current_ansi else ""))
+        # 下一行恢复本行行尾仍打开的颜色
+        current = list(open_codes)
+        current_w = 0
+        prev_plain = ""
+        current_ansi = bool(open_codes)
+
+    for chunk, is_ansi in _split_ansi(text):
+        if is_ansi:
+            current.append(chunk)
+            current_ansi = True
+            if chunk == _RESET:
+                open_codes.clear()
+            else:
+                open_codes.append(chunk)
+            continue
+        for ch in chunk:
+            w = 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+            if ch == " ":
+                # 行首或连续空格省略，保持原有“空格分词”语义
+                if current_w == 0 or prev_plain == " ":
+                    continue
+                if current_w + 1 > width:
+                    _break_line()
+                    continue
+                current.append(ch)
+                current_w += 1
+                prev_plain = ch
+                continue
+            if current_w + w > width and current_w > 0:
+                _break_line()
+            current.append(ch)
+            current_w += w
+            prev_plain = ch
+
+    if current_w > 0:
+        lines.append("".join(current) + (_RESET if current_ansi else ""))
+    return lines or [""]
+
+
+def _hard_break(text: str, width: int) -> list[str]:
+    """对超长单词/CJK 连续文本按显示宽度硬折行。"""
+    if display_width(text) <= width:
+        return [text]
+    lines: list[str] = []
+    current = ""
+    current_w = 0
+    for ch in text:
+        w = 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+        if current and current_w + w > width:
+            lines.append(current)
+            current = ""
+            current_w = 0
+        current += ch
+        current_w += w
+    if current:
+        lines.append(current)
+    return lines
+
+
+def panel(title: str = "", lines: list[str] | None = None, width: int = 66) -> str:
+    """生成圆角卡片式面板。
+
+    Args:
+        title: 面板标题（居中显示在顶边框）
+        lines: 面板内容行（自动按显示宽度折行）
+        width: 面板总宽度（列数）
+    """
+    lines = lines or []
+    if title:
+        title_str = f" {title} "
+        fill = max(2, width - 3 - display_width(title_str))
+        top = "╭─" + title_str + "─" * fill + "╮"
+    else:
+        top = "╭" + "─" * (width - 2) + "╮"
+    content_w = width - 4
+    body = []
+    for raw in lines:
+        for line in wrap_text(raw, content_w):
+            body.append("│ " + pad_text(line, content_w) + " │")
+    bottom = "╰" + "─" * (width - 2) + "╯"
+    return "\n".join([top, *body, bottom])
+
+
+def format_agent_header(role: str, name: str) -> str:
+    """Agent 启动行：● role name。"""
+    dot = colorize("●", role_color(role))
+    tag = colorize(role, role_color(role))
+    return f"  {dot} {tag}  {bold(name)}"
 
 
 # ─── 审查结果格式化 ───
@@ -249,33 +406,138 @@ def format_token_usage(input_tokens: int, output_tokens: int) -> str:
     return " / ".join(parts)
 
 
+def format_elapsed(seconds: float) -> str:
+    """格式化耗时（秒 → 人类可读）。"""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes = int(seconds // 60)
+    sec = seconds % 60
+    return f"{minutes}m{sec:.0f}s"
+
+
 # ─── 工具调用格式化 ───
+
+
+_TOOL_ARG_PRIORITY = (
+    "path", "file", "command", "pattern", "query",
+    "dir", "url", "name", "agent_id", "task", "work_dir",
+)
+
+
+def _shorten_arg(value, limit: int = 40) -> str:
+    text = str(value)
+    if len(text) > limit:
+        return text[:limit] + "..."
+    return text
+
+
+def _summarize_tool_args(args: dict | None) -> str:
+    """提取工具调用最关键的参数摘要，如 path=src/main.py。"""
+    if not args:
+        return ""
+    short = {k: v for k, v in args.items() if k != "result"}
+    if not short:
+        return ""
+    parts: list[str] = []
+    for key in _TOOL_ARG_PRIORITY:
+        if key in short:
+            parts.append(f"{key}={_shorten_arg(short[key])}")
+            if len(parts) >= 2:
+                break
+    if not parts:
+        for key, value in list(short.items())[:2]:
+            parts.append(f"{key}={_shorten_arg(value)}")
+    return " ".join(parts)
+
 
 def format_tool_call_start(name: str, args: dict | None = None, num: int = 0) -> str:
     """格式化工具调用开始。"""
-    icon = colorize("🔧", _GRAY)
-    tool_name = colorize(name, _BRIGHT_CYAN)
-    num_str = dim(f"#{num}") if num > 0 else ""
-    detail = ""
-    if args:
-        # 只显示关键参数，截断过长的值
-        short_args = {}
-        for k, v in list(args.items())[:3]:
-            sv = str(v)
-            if len(sv) > 50:
-                sv = sv[:50] + "..."
-            short_args[k] = sv
-        detail = dim(f"({short_args})") if short_args else ""
-    parts = [f"  {icon}", num_str, tool_name, detail]
-    return " ".join(p for p in parts if p)
+    parts = [f"  {colorize('⏺', _GRAY)}", colorize(name, _BRIGHT_CYAN)]
+    if num > 0:
+        parts.append(dim(f"#{num}"))
+    detail = _summarize_tool_args(args)
+    if detail:
+        parts.append(dim(detail))
+    return " ".join(parts)
 
 
-def format_tool_call_result(name: str, success: bool) -> str:
+def format_tool_call_result(
+    name: str,
+    success: bool,
+    elapsed: str | None = None,
+    summary: str | None = None,
+) -> str:
     """格式化工具调用结果。"""
     if success:
-        return f"  {colorize('✓', _GREEN)} {dim(name)} ok"
+        head = f"{colorize('✓', _GREEN)} {colorize(name, _BRIGHT_CYAN)} {dim('ok')}"
     else:
-        return f"  {colorize('✗', _RED)} {colorize(name, _RED)} failed"
+        head = f"{colorize('✗', _RED)} {colorize(name, _RED)} {colorize('failed', _RED)}"
+    parts = [f"  {head}"]
+    if summary:
+        parts.append(dim(_shorten_arg(summary, limit=60)))
+    if elapsed:
+        parts.append(dim(elapsed))
+    return " · ".join(parts)
+
+
+def truncate_ansi(text: str, width: int) -> str:
+    """按显示宽度截断文本（支持 ANSI 颜色码），超出部分省略并闭合颜色。
+
+    用于保证工具行等动态刷新的行始终只占一行，避免换行后覆盖错乱。
+    """
+    if width <= 0:
+        return ""
+    if display_width(text) <= width:
+        return text
+
+    out: list[str] = []
+    out_w = 0
+    open_codes: list[str] = []
+    i, n = 0, len(text)
+    while i < n and out_w < width:
+        if text[i] == "\033":
+            j = text.find("m", i)
+            if j == -1:
+                break
+            code = text[i:j + 1]
+            out.append(code)
+            if code == _RESET:
+                open_codes.clear()
+            else:
+                open_codes.append(code)
+            i = j + 1
+            continue
+        ch = text[i]
+        chw = 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+        if out_w + chw > width:
+            break
+        out.append(ch)
+        out_w += chw
+        i += 1
+
+    result = "".join(out)
+    if open_codes:
+        result += _RESET
+    if i < n and display_width(result) + 1 <= width:
+        result += "…"
+    return result
+
+
+def summarize_tool_result(result: str, max_chars: int = 48) -> str:
+    """从工具结果中提取一行紧凑摘要。
+
+    多行结果显示首行 + 总行数，避免把整个文件列表/树贴到工具结果行里。
+    """
+    if not result or not result.strip():
+        return ""
+    lines = [ln.strip() for ln in result.splitlines() if ln.strip()]
+    first = lines[0]
+    if len(lines) > 1:
+        tail = f"（共 {len(lines)} 行）"
+        budget = max(12, max_chars - len(tail))
+        snippet = first if len(first) <= budget else first[:budget] + "…"
+        return snippet + tail
+    return first if len(first) <= max_chars else first[:max_chars] + "…"
 
 
 # ─── 计时器 ───
@@ -304,12 +566,7 @@ class Timer:
 
     def elapsed_str(self) -> str:
         """格式化耗时。"""
-        sec = self.elapsed
-        if sec < 60:
-            return f"{sec:.1f}s"
-        minutes = int(sec // 60)
-        seconds = sec % 60
-        return f"{minutes}m{seconds:.0f}s"
+        return format_elapsed(self.elapsed)
 
 
 # ─── Spinner 动画 ───
@@ -371,6 +628,108 @@ class Spinner:
         self._label = label
 
 
+# ─── Markdown 流式渲染 ───
+
+_MD_CODE_FENCE_RE = re.compile(r"^```([\w+-]*)\s*$")
+_MD_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
+_MD_HR_RE = re.compile(r"^\s*(---|\*\*\*|___)\s*$")
+_MD_QUOTE_RE = re.compile(r"^>\s?(.*)$")
+_MD_LIST_RE = re.compile(r"^(\s*)[-*+]\s+(.*)$")
+_INLINE_CODE_RE = re.compile(r"`([^`]+)`")
+_BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")
+
+
+def _render_inline(text: str) -> str:
+    """渲染行内 Markdown：`code` 与 **bold**。"""
+    text = _INLINE_CODE_RE.sub(lambda m: colorize(m.group(1), _CYAN), text)
+    text = _BOLD_RE.sub(lambda m: colorize(m.group(1), _BOLD), text)
+    return text
+
+
+def _render_md_line(line: str) -> str:
+    """渲染单行 Markdown 文本。"""
+    if not line.strip():
+        return ""
+    if _MD_HR_RE.match(line):
+        return dim("─" * 40) + "\n"
+    m = _MD_HEADING_RE.match(line)
+    if m:
+        level = len(m.group(1))
+        color = _BRIGHT_CYAN if level <= 2 else _CYAN
+        return colorize(f"{'#' * level} {_render_inline(m.group(2))}", color) + "\n"
+    m = _MD_QUOTE_RE.match(line)
+    if m:
+        return dim("│ ") + _render_inline(m.group(1)) + "\n"
+    m = _MD_LIST_RE.match(line)
+    if m:
+        indent = m.group(1)
+        return indent + colorize("•", _GRAY) + " " + _render_inline(m.group(2)) + "\n"
+    return _render_inline(line) + "\n"
+
+
+def _code_block_open(lang: str) -> str:
+    return dim(f"```{lang}") + "\n"
+
+
+def _code_block_line(line: str) -> str:
+    if should_use_color():
+        return colorize("│", _GRAY) + " " + line + "\n"
+    return "  " + line + "\n"
+
+
+def _code_block_close() -> str:
+    return dim("```") + "\n"
+
+
+class StreamingMarkdownRenderer:
+    """增量渲染 Markdown 文本（面向流式 chunk 输出）。
+
+    以行为单位渲染：完整行立即输出；未完成的行缓冲到 flush()。
+    支持代码块、标题、引用、列表、行内 code 与 **bold**。
+    """
+
+    def __init__(self) -> None:
+        self._buf = ""
+        self._in_code = False
+
+    def feed(self, chunk: str) -> str:
+        """接收一段文本，返回可打印的已渲染部分。"""
+        if not chunk:
+            return ""
+        self._buf += chunk
+        out: list[str] = []
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            out.append(self._render_line(line))
+        return "".join(out)
+
+    def flush(self) -> str:
+        """输出缓冲中未完成的行。"""
+        if not self._buf:
+            return ""
+        line, self._buf = self._buf, ""
+        return self._render_line(line)
+
+    def _render_line(self, line: str) -> str:
+        stripped = line.strip()
+        if self._in_code:
+            if _MD_CODE_FENCE_RE.match(stripped):
+                self._in_code = False
+                return _code_block_close()
+            return _code_block_line(line)
+        m = _MD_CODE_FENCE_RE.match(stripped)
+        if m:
+            self._in_code = True
+            return _code_block_open(m.group(1))
+        return _render_md_line(line)
+
+
+def render_markdown(text: str) -> str:
+    """渲染完整 Markdown 文本（非流式场景使用）。"""
+    renderer = StreamingMarkdownRenderer()
+    return renderer.feed(text) + renderer.flush()
+
+
 # ─── 彩色 Diff 格式化 ───
 
 def format_diff(diff_text: str, max_lines: int = 50) -> str:
@@ -399,19 +758,24 @@ def format_diff(diff_text: str, max_lines: int = 50) -> str:
     formatted = []
     for line in lines:
         if line.startswith("---") or line.startswith("+++"):
-            formatted.append(colorize(line, _BRIGHT_CYAN))
+            styled = colorize(line, _BRIGHT_CYAN)
         elif line.startswith("@@"):
-            formatted.append(colorize(line, _MAGENTA))
+            styled = colorize(line, _MAGENTA)
         elif line.startswith("-"):
-            formatted.append(colorize(line, _RED))
+            styled = colorize(line, _RED)
         elif line.startswith("+"):
-            formatted.append(colorize(line, _GREEN))
+            styled = colorize(line, _GREEN)
         else:
-            formatted.append(dim(line))
+            styled = dim(line)
+        if should_use_color():
+            formatted.append(colorize("│", _GRAY) + " " + styled)
+        else:
+            formatted.append("  " + styled)
 
     result = "\n".join(formatted)
     if truncated:
-        result += f"\n{dim('...(diff 已截断)')}"
+        marker = dim("...(diff 已截断)")
+        result += f"\n{colorize('│', _GRAY) + ' ' + marker if should_use_color() else '  ' + marker}"
     return result
 
 

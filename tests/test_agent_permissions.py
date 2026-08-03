@@ -296,37 +296,13 @@ class BuiltinAgentPermissionsTests(unittest.TestCase):
         self.assertIsNotNone(agent)
         self.assertIsNone(agent.permissions)
 
-    def test_planner_is_read_only_and_can_delegate(self) -> None:
-        """planner 只读、可委派、不可被 handoff。"""
+    def test_default_roster_only_main(self) -> None:
+        """默认 roster 只有 main，不再内置流程角色（planner/coder/reviewer）。"""
         store = self._make_default_store()
-        agent = store.get_agent("planner")
-        self.assertIsNotNone(agent)
-        self.assertEqual(agent.permissions.max_command_risk, "read_only")
-        self.assertTrue(agent.permissions.allow_delegation)
-        self.assertFalse(agent.permissions.allow_handoff)
-        # 工具集应包含 delegate_agent 但不包含 write_file/edit_file/run_console
-        self.assertIn("delegate_agent", agent.tools)
-        self.assertNotIn("write_file", agent.tools)
-        self.assertNotIn("run_console", agent.tools)
-
-    def test_coder_has_write_tools_but_cannot_delegate(self) -> None:
-        """coder 有写工具、不可委派、可被 handoff。"""
-        store = self._make_default_store()
-        agent = store.get_agent("coder")
-        self.assertIsNotNone(agent)
-        self.assertEqual(agent.permissions.max_command_risk, "normal")
-        self.assertFalse(agent.permissions.allow_delegation)
-        self.assertTrue(agent.permissions.allow_handoff)
-        self.assertNotIn("delegate_agent", agent.tools)
-
-    def test_reviewer_is_read_only_with_console(self) -> None:
-        """reviewer 只读（有 run_console 但仅限只读命令）、不可委派、可被 handoff。"""
-        store = self._make_default_store()
-        agent = store.get_agent("reviewer")
-        self.assertIsNotNone(agent)
-        self.assertEqual(agent.permissions.max_command_risk, "read_only")
-        self.assertFalse(agent.permissions.allow_delegation)
-        self.assertTrue(agent.permissions.allow_handoff)
-        # run_console 存在但受限为只读命令
-        self.assertIn("run_console", agent.tools)
-        self.assertNotIn("write_file", agent.tools)
+        agent_ids = [a.agent_id for a in store.list_agents()]
+        self.assertEqual(agent_ids, ["main"])
+        main = store.get_agent("main")
+        # main 拥有全部工具（含 delegate_agent），可自行决定是否内部委派
+        self.assertIn("delegate_agent", main.tools)
+        self.assertIn("write_file", main.tools)
+        self.assertIn("run_console", main.tools)

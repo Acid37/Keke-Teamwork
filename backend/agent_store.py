@@ -35,72 +35,6 @@ _DEFAULT_AGENTS: list[dict] = [
         "description": "通用编程助手，拥有全部工具权限",
         "permissions": None,  # None = 无额外限制（完全向后兼容）
     },
-    {
-        "agent_id": "planner",
-        "name": "方案规划师",
-        "role": "planner",
-        "system_prompt": "",
-        "provider": None,
-        "model": None,
-        "temperature": 0.7,
-        "tools": [
-            "read_file", "grep_search", "find_files", "list_directory",
-            "delegate_agent",
-        ],
-        "max_tool_rounds": 30,
-        "max_context": None,
-        "color": "#f0a040",
-        "description": "只读探索 + 委派：拆解任务、分析需求、产出结构化计划",
-        "permissions": {
-            "max_command_risk": "read_only",
-            "allow_delegation": True,
-            "allow_handoff": False,
-        },
-    },
-    {
-        "agent_id": "coder",
-        "name": "编码专家",
-        "role": "coder",
-        "system_prompt": "",
-        "provider": None,
-        "model": None,
-        "temperature": 0.3,
-        "tools": [
-            "read_file", "write_file", "edit_file",
-            "run_console", "grep_search", "find_files", "list_directory",
-        ],
-        "max_tool_rounds": 80,
-        "max_context": None,
-        "color": "#50c878",
-        "description": "专注编码实现，不允许委派给其他 Agent",
-        "permissions": {
-            "max_command_risk": "normal",
-            "allow_delegation": False,
-            "allow_handoff": True,
-        },
-    },
-    {
-        "agent_id": "reviewer",
-        "name": "代码审查员",
-        "role": "reviewer",
-        "system_prompt": "",
-        "provider": None,
-        "model": None,
-        "temperature": 0.3,
-        "tools": [
-            "read_file", "grep_search", "find_files", "list_directory",
-            "run_console",
-        ],
-        "max_tool_rounds": 30,
-        "max_context": None,
-        "color": "#d080f0",
-        "description": "只读审查：检查 diff 质量、安全性、风格一致性",
-        "permissions": {
-            "max_command_risk": "read_only",
-            "allow_delegation": False,
-            "allow_handoff": True,
-        },
-    },
 ]
 
 
@@ -145,6 +79,22 @@ class AgentStore:
                 for item in data:
                     agent = AgentDefinition.from_dict(item)
                     self._agents[agent.agent_id] = agent
+                # 合并缺失的默认角色：只补齐缺失项，绝不覆盖用户已有的
+                # 自定义定义（默认 roster 目前只有 main）。
+                loaded_ids = set(self._agents)
+                missing = [
+                    item for item in _DEFAULT_AGENTS
+                    if item["agent_id"] not in loaded_ids
+                ]
+                if missing:
+                    for item in missing:
+                        agent = AgentDefinition.from_dict(item)
+                        self._agents[agent.agent_id] = agent
+                    self._persist()
+                    logger.info(
+                        "Merged missing default agents: %s",
+                        [m["agent_id"] for m in missing],
+                    )
                 logger.info("Loaded %d agents from %s", len(self._agents), self._file)
             except Exception:
                 logger.warning("加载 agents.json 失败，使用默认值", exc_info=True)

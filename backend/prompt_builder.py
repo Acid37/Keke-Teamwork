@@ -52,6 +52,8 @@ _ROLE_BASE_PROMPTS: dict[str, str] = {
         "- 修改后尽可能运行测试验证\n"
         "- 修改前先解释你的思路\n"
         "- 不确定项目结构时，先用 list_directory 和 grep_search 探索\n"
+        "- 常规任务直接完成；遇到需要深入调研的独立子问题时，用 delegate_agent 委派给已配置的专业 agent\n"
+        "- 边界清晰、需要写代码的独立功能，可 handoff 给已配置的专业 agent 实现，完成后复核其变更\n"
     ),
     "planner": (
         "你是一个方案规划师，负责分析用户需求并拆解为可执行的任务计划。\n"

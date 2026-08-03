@@ -1,4 +1,4 @@
-from backend.types import ToolResult
+from backend.types import ToolResult, ToolSchema
 from backend.tools.base import Tool, ToolCategory
 
 
@@ -16,8 +16,7 @@ class DelegateTool(Tool):
         "properties": {
             "agent_id": {
                 "type": "string",
-                "description": "目标 Agent 的 ID，通常为 'researcher' 或 'coder'。",
-                "default": "researcher",
+                "description": "目标 Agent 的 ID（可用 Agent 见工具描述）。",
             },
             "task": {
                 "type": "string",
@@ -32,6 +31,17 @@ class DelegateTool(Tool):
         "required": ["agent_id", "task"],
     }
 
+    def to_schema(self) -> ToolSchema:
+        """生成工具 schema，并把当前已配置的 Agent 列表动态注入描述。"""
+        schema = ToolSchema(self.name, self.description, self.parameters)
+        agents = getattr(self._ctx, "available_agents", None) or []
+        if agents:
+            ids = [a.agent_id for a in agents]
+            schema.parameters["properties"]["agent_id"]["description"] = (
+                "目标 Agent 的 ID。当前可用: " + ", ".join(ids)
+            )
+        return schema
+
     async def execute(self, **kwargs) -> ToolResult:
         runner = getattr(self._ctx, "delegate_runner", None)
         if not runner:
@@ -42,12 +52,14 @@ class DelegateTool(Tool):
         if perms and not getattr(perms, "allow_delegation", True):
             return (False, "当前 Agent 不允许委派任务给其他 Agent")
 
-        agent_id = kwargs.get("agent_id") or "researcher"
+        agent_id = kwargs.get("agent_id") or ""
         task = (kwargs.get("task") or "").strip()
         context = (kwargs.get("context") or "").strip()
 
         if not task:
             return (False, "task 参数是必需的")
+        if not agent_id:
+            return (False, "agent_id 参数是必需的（可用 Agent 见工具描述）")
 
         try:
             result = await runner(agent_id=agent_id, task=task, context=context)

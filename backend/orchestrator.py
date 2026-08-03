@@ -323,7 +323,8 @@ class AgentOrchestrator:
             session=session, work_dir=session.work_dir, staging=staging,
             permission_mgr=permission_mgr, delegate_runner=run_child_agent,
             agent_permissions=agent_perms,
-            broadcast=broadcast, interrupt_check=lambda: session.interrupt_requested)
+            broadcast=broadcast, interrupt_check=lambda: session.interrupt_requested,
+            available_agents=self._agent_store.list_agents())
 
     def _create_agent(self, llm, agent_def, effective_model, session) -> Agent:
         """构建 Agent 实例，设置工具和系统提示词。"""

@@ -206,6 +206,7 @@ class ToolContext:
     agent_permissions: Any = None  # AgentPermissions | None
     broadcast: Callable[..., Awaitable[None]] | None = None
     interrupt_check: Callable[[], bool] | None = None
+    available_agents: Any = None  # 已配置的 AgentDefinition 列表（用于委派工具动态提示）
 
 
 # ─── Agent 定义 ───

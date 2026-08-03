@@ -6,22 +6,29 @@ import pytest
 
 from backend.cli_display import (
     Spinner,
+    StreamingMarkdownRenderer,
     Timer,
     banner,
     bold,
     colorize,
     dim,
+    display_width,
+    format_agent_header,
     format_diff,
+    format_elapsed,
     format_file_change,
     format_phase_status,
     format_tool_call_result,
     format_tool_call_start,
     format_token_usage,
     format_verdict,
+    pad_text,
+    panel,
     phase_banner,
     phase_color,
     phase_icon,
     progress_bar,
+    render_markdown,
     role_color,
     role_label,
     separator,
@@ -29,6 +36,9 @@ from backend.cli_display import (
     should_use_color,
     severity_color,
     severity_icon,
+    summarize_tool_result,
+    truncate_ansi,
+    wrap_text,
 )
 
 
@@ -167,13 +177,13 @@ class TestPhaseColors:
 
     def test_phase_banner(self):
         result = phase_banner("coding", "实现功能")
-        assert "CODING" in result
+        assert "coding" in result
         assert "实现功能" in result
         assert "─" in result
 
     def test_phase_banner_no_detail(self):
         result = phase_banner("planning")
-        assert "PLANNING" in result
+        assert "planning" in result
 
 
 # ─── 进度条测试 ───
@@ -566,3 +576,193 @@ class TestFormatFileChange:
         result = format_file_change("src/main.py", "create")
         assert "\033[" not in result
         assert "新建" in result
+
+
+# ─── 显示宽度 / 面板测试 ───
+
+
+class TestDisplayWidth:
+    """显示宽度估算测试。"""
+
+    def test_ascii_width(self):
+        assert display_width("hello") == 5
+
+    def test_cjk_width(self):
+        assert display_width("你好") == 4
+
+    def test_ansi_ignored(self):
+        assert display_width("\033[31mred\033[0m") == 3
+
+    def test_pad_text(self):
+        assert pad_text("ab", 4) == "ab  "
+        assert pad_text("中文", 4) == "中文"
+
+    def test_wrap_text_short(self):
+        assert wrap_text("short", 20) == ["short"]
+
+    def test_wrap_text_long(self):
+        lines = wrap_text("a b c d e f g h", 6)
+        assert len(lines) > 1
+        assert "".join(lines).replace(" ", "") == "abcdefgh"
+
+    def test_wrap_text_ansi_long(self, color_enabled):
+        """含 ANSI 颜色码的长文本应按显示宽度折行且每行颜色闭合。"""
+        text = colorize("蓝色标题" * 30, "\033[34m")
+        lines = wrap_text(text, 20)
+        assert len(lines) > 1
+        for line in lines:
+            assert display_width(line) <= 20
+            assert "\033[34m" in line  # 折行后每行都恢复颜色
+            assert line.endswith("\033[0m")  # 行尾颜色闭合
+
+    def test_wrap_text_ansi_preserves_content(self, color_enabled):
+        """ANSI 折行不应丢失或改变文本内容。"""
+        text = colorize("abc def ghi jkl", "\033[2m")
+        lines = wrap_text(text, 6)
+        plain = "".join(lines)
+        plain = plain.replace("\033[2m", "").replace("\033[0m", "")
+        assert plain.replace(" ", "") == "abcdefghijkl"
+
+    def test_truncate_ansi(self, color_enabled):
+        """ANSI 长行应按显示宽度截断且颜色闭合。"""
+        text = colorize("abcdefghij", "\033[31m")
+        truncated = truncate_ansi(text, 5)
+        assert display_width(truncated) <= 5
+        assert "\033[31m" in truncated
+        assert truncated.endswith("\033[0m")
+
+    def test_summarize_tool_result(self):
+        """工具结果摘要：多行显示首行 + 行数，单行截断。"""
+        assert summarize_tool_result("a.png\nb.png\nc.png") == "a.png（共 3 行）"
+        assert summarize_tool_result("single result") == "single result"
+        assert summarize_tool_result("") == ""
+        assert summarize_tool_result("  \n  ") == ""
+
+
+class TestPanel:
+    """面板渲染测试。"""
+
+    def test_panel_contains_borders_and_title(self):
+        result = panel("标题", ["内容"])
+        assert "╭" in result
+        assert "╰" in result
+        assert "标题" in result
+        assert "内容" in result
+
+    def test_panel_all_lines_same_width(self):
+        result = panel("T", ["a", "中文", ""])
+        lines = result.split("\n")
+        widths = {display_width(line) for line in lines}
+        assert len(widths) == 1
+
+    def test_panel_wraps_long_line(self):
+        result = panel("", ["x" * 100])
+        assert result.count("│") >= 4  # 顶/底边框 + 折行后的多行
+
+    def test_panel_wraps_ansi_long_line(self, color_enabled):
+        """含 ANSI 颜色码的长行折行后不应撑破面板边框。"""
+        result = panel("", [colorize("彩色长内容" * 30, "\033[31m")])
+        widths = {display_width(line) for line in result.splitlines()}
+        assert len(widths) == 1
+
+    def test_panel_no_color(self):
+        result = panel("T", ["x"])
+        assert "\033[" not in result
+
+
+# ─── Agent 头部 / 耗时测试 ───
+
+
+class TestAgentHeader:
+    """Agent 启动行格式化测试。"""
+
+    def test_header_contains_role_and_name(self):
+        result = format_agent_header("planner", "方案规划师")
+        assert "planner" in result
+        assert "方案规划师" in result
+        assert "●" in result
+
+    def test_header_with_color(self, color_enabled):
+        result = format_agent_header("planner", "方案规划师")
+        assert "\033[34m" in result  # BLUE
+
+
+class TestFormatElapsed:
+    """耗时格式化测试。"""
+
+    def test_seconds(self):
+        assert format_elapsed(3.5) == "3.5s"
+
+    def test_minutes(self):
+        result = format_elapsed(95)
+        assert "m" in result
+        assert "s" in result
+
+
+# ─── 工具调用结果扩展测试 ───
+
+
+class TestToolCallResultExtra:
+    """format_tool_call_result 的耗时/摘要参数。"""
+
+    def test_elapsed(self):
+        result = format_tool_call_result("read_file", True, elapsed="0.8s")
+        assert "0.8s" in result
+
+    def test_summary_truncated(self):
+        result = format_tool_call_result("run_console", True, summary="x" * 200)
+        assert "..." in result
+
+
+# ─── Markdown 流式渲染测试 ───
+
+
+class TestStreamingMarkdown:
+    """StreamingMarkdownRenderer 测试。"""
+
+    def test_partial_chunk_buffered(self):
+        r = StreamingMarkdownRenderer()
+        assert r.feed("**bo") == ""
+        assert r.feed("ld**\n") == "bold\n"
+        assert r.flush() == ""
+
+    def test_flush_remaining(self):
+        r = StreamingMarkdownRenderer()
+        r.feed("hello")
+        assert r.flush() == "hello\n"
+
+    def test_inline_code(self):
+        result = render_markdown("使用 `read_file` 工具")
+        assert "read_file" in result
+        assert "`" not in result
+
+    def test_bold(self):
+        result = render_markdown("**重要**")
+        assert result == "重要\n"
+
+    def test_heading(self):
+        result = render_markdown("# 标题")
+        assert "# 标题" in result
+
+    def test_code_fence(self):
+        result = render_markdown("```py\nx = 1\n```")
+        assert "```py" in result
+        assert "x = 1" in result
+        assert "```" in result
+
+    def test_list_marker(self):
+        result = render_markdown("- 第一项")
+        assert "•" in result
+        assert "第一项" in result
+
+    def test_horizontal_rule(self):
+        result = render_markdown("---")
+        assert "─" in result
+
+    def test_no_ansi_when_disabled(self):
+        result = render_markdown("`code` 与 **bold**")
+        assert "\033[" not in result
+
+    def test_color_enabled(self, color_enabled):
+        result = render_markdown("`code`")
+        assert "\033[36m" in result  # CYAN
